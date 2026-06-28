@@ -1,0 +1,232 @@
+---
+name: book-to-learn
+description: |
+  把任意一本书分解成日常学习任务，每日推送一张知识点卡片。
+  支持中英文书籍（PDF/DOCX/HTML/EPUB/TXT），拆解为知识点后每日推送。
+  当用户提到"拆书学习"、"book to learn"、"每日读书卡片"、"把书分解成学习任务"、
+  "推送读书卡片"，或要对一本书建立每日学习推送时，使用此 skill。
+  英文书自动联网核对术语并实时翻译；中文书无翻译环节。
+  默认推送 IMA 知识库（PDF 形式），备选飞书卡片消息。
+  首次使用需配置 IMA 凭证/推送目标/通知 webhook。
+homepage: https://github.com/virgiliojr94/book-to-skill
+metadata:
+  openclaw:
+    emoji: 📖
+    requires:
+      env:
+        - IMA_OPENAPI_CLIENTID
+        - IMA_OPENAPI_APIKEY
+    primaryEnv: IMA_OPENAPI_CLIENTID
+  security:
+    credentials_usage: |
+      本 skill 调用 IMA OpenAPI 上传 PDF，或调用飞书 webhook 发送卡片。
+      IMA 凭证存储于 ~/.config/ima/，仅发送给 ima.qq.com。
+      飞书 webhook URL 存储于 config.json，仅发送给 open.feishu.cn。
+      失败通知发送给 config.json 的 notifyWebhook。
+    allowed_domains:
+      - ima.qq.com
+      - '*.myqcloud.com'
+      - open.feishu.cn
+---
+
+# book-to-learn — 把书分解成日常学习任务
+
+通用 skill：把任意一本书拆解为知识点卡片，每日推送一张。
+
+## ⛔ 核心规则
+
+1. **两阶段**：拆书（一次性）+ 推送（每次调用）。每本书先拆书生成数据，之后每日推送复用。
+2. **进度仅在成功后记录**：任一环节失败都不更新 progress.json，下次重推同一张。
+3. **中英文自适应**：英文书联网核对术语 + 实时翻译；中文书跳过翻译。
+4. **超链接文字化**：IMA 不能点击链接，PDF 中 URL 必须纯文字显示可复制。
+5. **失败必通知**：任何失败（提取/翻译/PDF/上传/飞书）都通过 webhook 通知，且不计进度。
+6. **首次配置**：无 config.json 时引导用户配置（IMA 凭证/推送目标/通知 webhook/语言/粒度）。
+
+## 依赖安装（首次使用前）
+
+### 1. Python 依赖
+```bash
+sudo pip3 install weasyprint python-docx beautifulsoup4 ebooklib pypdf pdfminer.six
+# weasyprint 生成 PDF；其余为多格式提取器。沙箱已预装大部分。
+```
+
+### 2. IMA skill（若用 IMA 推送）
+```bash
+cd /tmp && curl -sL -o ima-skills.zip "https://app-dl.ima.qq.com/skills/ima-skills-1.1.7.zip"
+mkdir -p ima-skills-extracted && unzip -o ima-skills.zip -d ima-skills-extracted >/dev/null 2>&1
+cp -r ima-skills-extracted/ima-skill /root/.codebuddy/skills/ima-skill
+```
+API Key 获取：https://ima.qq.com/agent-interface
+```bash
+mkdir -p ~/.config/ima
+echo "<Client ID>" > ~/.config/ima/client_id
+printf '%s' "<API Key>" > ~/.config/ima/api_key
+```
+
+### 3. Node.js 注意
+沙箱中 node 可能被 bun shim 劫持。所有 node 调用用 `/usr/bin/node` 并清除 NODE_OPTIONS。upload_ima.py 已内置。
+
+---
+
+## 阶段一：拆书（首次对每本书执行）
+
+SKILL_DIR = `/root/.codebuddy/skills/book-to-learn`。下面 `$SD` 代表 SKILL_DIR。
+
+### Step 1：提取文本
+```bash
+cd $SD && python3 book_setup.py extract <书文件路径> --slug <book-slug>
+```
+slug = 书的 URL 友好标识（如 `designing-data-intensive-apps`）。输出 `books/<slug>/full_text.txt`。
+
+### Step 2：初始化配置
+```bash
+cd $SD && python3 book_setup.py init <book-slug> --title "书名" --lang <zh|en> --granularity <chapter|section|topic>
+```
+生成 `books/<slug>/config.json` 骨架。然后**与用户确认并填写**以下空字段：
+- `language`：zh（中文书，无翻译）/ en（英文书，需翻译）
+- `pushMethod`：ima（默认）/ feishu（备选）
+- `ima.kbName` / `ima.folderName`：IMA 知识库名称和文件夹（用 `list-kb` 命令列出知识库让用户选）
+- `feishu.webhook`：飞书 webhook（若选 feishu）
+- `notifyWebhook`：失败通知 webhook（**必填**，任何失败都发此通知）
+
+**确认推送方案**：向用户说明两种方案并让其选择：
+- **IMA PDF（默认）**：上传卡片式 PDF 到 IMA 知识库文件夹。优势：可检索、配图内嵌、离线可读。适合知识库积累。
+- **飞书卡片（备选）**：发送交互式卡片消息到飞书 webhook。优势：即时通知、交互式。限制：图片需上传图床（catbox.moe）获取 URL。适合即时学习提醒。
+
+### Step 3：AI 分析结构并生成大纲
+读取 `books/<slug>/full_text.txt`（大书用 offset/limit 分段读，先读前 8000 字符识别标题/作者/章节/目录）。
+按 config.granularity 拆解为知识点，输出**大纲 JSON** 供用户确认：
+```json
+[{"id":"ch01-01","chapter":"第一章","topic":"主题"}, ...]
+```
+**必须等用户确认或调整大纲后**，再进入 Step 4。
+
+### Step 4：生成完整 items.json
+确认大纲后，为每个知识点生成完整对象（读取 full_text.txt 对应章节内容）：
+```json
+{
+  "id": "ch01-01",
+  "chapter": "所属章节",
+  "topic": "知识点主题",
+  "coreIdea": "核心观点（原文语言）",
+  "explanation": "详细解释（原文语言，含 markdown 链接 [text](url)）",
+  "quote": "金句（若有）",
+  "application": "应用场景（若有）",
+  "image": "原书配图链接（若有）",
+  "relatedLinks": [{"href":"url","text":"标题"}],
+  "terminology": ["核心术语"],
+  "link": "来源链接"
+}
+```
+写入 `books/<slug>/items.json`。
+
+### Step 5：生成卡片和索引
+```bash
+cd $SD && python3 book_setup.py gen-cards --slug <book-slug>
+cd $SD && python3 book_setup.py gen-index --slug <book-slug>
+```
+
+### Step 6：下载内嵌配图
+```bash
+cd $SD && python3 book_setup.py download-imgs --slug <book-slug>
+```
+下载 items.json 中的图片 URL，转为 base64 data URI 内嵌。
+
+### Step 7：输出定时任务提示词
+```bash
+cd $SD && python3 book_setup.py prompt --slug <book-slug>
+```
+输出该书的定时任务执行提示词，用户配置到定时任务软件。
+
+---
+
+## 阶段二：推送（每次调用执行一次）
+
+### 英文书流程（需翻译）
+
+1. **取载荷**：
+   ```bash
+   cd $SD && python3 push_card.py next --book <slug> --force > /tmp/b2l_payload.json
+   ```
+   解析输出。skip=true 则结束。
+
+2. **联网核对术语**：对 terminology 数组每个术语用 WebSearch 查权威中文译法，汇总 terminologyZh。必须核对。
+
+3. **实时翻译**：coreIdea/explanation/quote/application 译为中文。explanation 按换行分段对应；术语首次出现「中文（英文）」；explanation/application 含 markdown 链接的保留 url 仅译 text；翻译 relatedLinks 标题生成 relatedLinksZh。
+
+4. **写翻译 JSON** 到 `/tmp/b2l_zh.json`（含 coreIdeaZh/explanationZh/quoteZh/applicationZh/terminologyZh/relatedLinksZh/note）。
+
+5. **生成 PDF**：
+   ```bash
+   cd $SD && python3 gen_card_pdf.py --payload /tmp/b2l_payload.json --zh /tmp/b2l_zh.json --out "/tmp/<PREFIX>_$(date +%F)_<nextId>.pdf" --language en
+   ```
+
+6. **推送**（按 config.pushMethod）：
+   - IMA：`python3 upload_ima.py --file "<pdf>" --config books/<slug>/config.json --book-dir books/<slug>`
+     退出码 0=成功；2=密钥失效（已发通知）不计进度结束；1=其他错误不更新进度结束。
+   - 飞书：`python3 send_feishu.py --payload /tmp/b2l_payload.json --zh /tmp/b2l_zh.json --config books/<slug>/config.json --language en`
+
+7. **记录进度**（仅成功后）：`python3 push_card.py mark --book <slug> <nextId> success`
+
+8. **汇报**：第 X/N 张、主题、术语核对要点。
+
+### 中文书流程（无翻译）
+
+1. **取载荷**：同上。
+2. **跳过翻译**（步骤 2-4 不执行）。
+3. **生成 PDF**：
+   ```bash
+   cd $SD && python3 gen_card_pdf.py --payload /tmp/b2l_payload.json --out "/tmp/<PREFIX>_$(date +%F)_<nextId>.pdf" --language zh
+   ```
+4. **推送**：同上（飞书则 `--language zh`，不传 --zh）。
+5. **记录进度**：同上。
+6. **汇报**：第 X/N 张、主题。
+
+---
+
+## 飞书卡片方案实现说明（备选）
+
+send_feishu.py 构造飞书 interactive 卡片 JSON，POST 到 webhook。
+
+**卡片结构**：
+- header：蓝色标题「📚 书名 · 主题」
+- elements：进度+章节 → 术语表(markdown表格) → 内容分栏(中英对照/纯中文) → 配图 → 相关链接 → 来源(note)
+
+**图片处理**（飞书卡片图片需 URL 或 image_key）：
+1. base64 data URI 图片 → 上传 catbox.moe（免费无需注册）→ 获取 URL → `{"tag":"img","url":"..."}`
+2. 图片 URL 直接用 `{"tag":"img","url":"..."}`
+3. 上传失败 → 文字提示「配图见来源链接」
+
+**链接处理**：飞书卡片 markdown 支持可点击链接，但为兼容性仍附纯文字 URL。
+
+---
+
+## 文件说明
+
+| 文件 | 作用 |
+|------|------|
+| `SKILL.md` | 本指令 |
+| `extract_text.py` | 多格式文本提取（PDF/DOCX/HTML/EPUB/TXT/RTF，带回退链） |
+| `book_setup.py` | 拆书编排（extract/init/gen-cards/gen-index/download-imgs/prompt） |
+| `push_card.py` | 推送进度管理（status/next/mark/weekday/list-books，--book 参数化） |
+| `gen_card_pdf.py` | 卡片式 PDF 生成（中英文自适应，超链接文字化） |
+| `upload_ima.py` | IMA 知识库上传（参数化 kb/folder，密钥失效检测） |
+| `send_feishu.py` | 飞书卡片推送（图床上传，中英文自适应） |
+| `notify_failure.py` | 通用失败通知（参数化 webhook） |
+| `books/<slug>/` | 每本书独立数据（config/items/index/progress/cards/images/full_text） |
+
+## 辅助命令
+
+- 查看所有书：`cd $SD && python3 push_card.py list-books`
+- 查看进度：`python3 push_card.py status --book <slug>`
+- 手动重推：`python3 push_card.py next --book <slug> --force`
+- 重置进度：编辑 `books/<slug>/progress.json`，置 null 清空 history
+- 输出定时提示词：`python3 book_setup.py prompt --slug <slug>`
+
+## 注意事项
+
+- 进度是唯一凭证，勿手动误改 progress.json
+- 失败绝不计进度，确保下次重推同一张
+- PDF 文件名日期格式统一 `YYYY-MM-DD`
+- 英文书翻译质量优先：术语必须联网核对
+- 假设不同用户使用：所有配置在 config.json，不硬编码
