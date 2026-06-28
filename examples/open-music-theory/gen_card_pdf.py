@@ -113,7 +113,7 @@ def build_html(payload, zh, date_str):
 <style>
 @page {{ size: 210mm 297mm; margin: 14mm 12mm; }}
 * {{ box-sizing: border-box; margin: 0; padding: 0; }}
-body {{ font-family: "Noto Sans CJK SC", "Noto Serif CJK SC", sans-serif; color: #1f2328; line-height: 1.7; }}
+body {{ font-family: "Microsoft YaHei", "微软雅黑", "PingFang SC", "Hiragino Sans GB", "Heiti SC", "Noto Sans CJK SC", "Source Han Sans SC", "WenQuanYi Micro Hei", "SimSun", "宋体", sans-serif; color: #1f2328; line-height: 1.7; }}
 .card {{ border: 2px solid #e1e4e8; border-radius: 18px; overflow: hidden; }}
 .card-head {{ background: linear-gradient(135deg,#1cb0f6,#0969da); color: #fff; padding: 16px 22px; }}
 .card-head .progress {{ font-size: 17px; font-weight: 700; opacity: .92; }}

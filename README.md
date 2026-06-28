@@ -39,6 +39,18 @@ cd book-to-learn
 sudo pip3 install weasyprint python-docx beautifulsoup4 ebooklib pypdf pdfminer.six
 ```
 
+### 中文字体（PDF 生成所需）
+
+PDF 卡片由 weasyprint 生成，依赖系统安装的中文字体。脚本已配置跨平台字体栈（微软雅黑/苹方/Noto CJK 等），自动适配 Windows / Mac / Linux。若 PDF 中中文显示为方块或空白，请确认系统已安装以下任一中文字体：
+
+| 平台 | 推荐字体 | 安装方式 |
+|------|----------|----------|
+| **Windows** | 微软雅黑 | 系统自带，通常无需安装 |
+| **macOS** | 苹方 / PingFang SC | 系统自带 |
+| **Linux** | Noto CJK / 文泉驿 | `sudo apt install fonts-noto-cjk` 或 `fonts-wqy-microhei` |
+
+> ⚠️ **weasyprint 在 Windows 上的安装提示**：weasyprint 依赖 GTK 运行时。Windows 安装时需先装 [GTK3](https://gtk.org/download/windows.php)，否则 `pip install weasyprint` 虽成功但运行时报错。如 Windows 上 weasyprint 难以配置，可考虑改用飞书卡片推送方案（无需 weasyprint）。
+
 如需推送到 IMA 知识库，还需安装 [IMA skill](https://ima.qq.com/agent-interface)：
 
 ```bash
