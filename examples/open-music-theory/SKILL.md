@@ -118,12 +118,14 @@ cd $SD && python3 push_card.py next --force > /tmp/omt_payload.json
 - 译文准确专业，符合乐理表达习惯
 - **explanationEn / applicationScenarios 中可能含 markdown 链接 `[text](url)`**：翻译时**保留 `[...](url)` 结构和 url 不变**，仅将方括号内的 text 翻译为中文（如 `["How was Musical Notation Invented?"](https://...)` → `[「音乐记谱法是如何发明的？」](https://...)`）；文件格式名 `pdf`/`docx` 等不翻译
 - **翻译 relatedLinks 的标题**：对载荷 `relatedLinks` 数组中每个链接的 `text`（英文原文标题）翻译为中文，生成 `relatedLinksZh` 数组
+- **翻译知识点标题**：将载荷 `topic` 翻译为中文，作为 `topicZh` 字段
 
 ### Step 4：写翻译 JSON
 
 将翻译结果写入 `/tmp/omt_zh.json`：
 ```json
 {
+  "topicZh": "知识点中文标题",
   "coreIdeaZh": "...",
   "explanationZh": "...(用\n分段,保留[text](url)链接结构)...",
   "quoteZh": "...",
@@ -137,19 +139,19 @@ cd $SD && python3 push_card.py next --force > /tmp/omt_payload.json
 }
 ```
 
-### Step 5：生成卡片式 PDF
+### Step 5：生成卡片式 PDF（文件名末尾带知识点中文名）
 
 ```bash
-cd $SD && python3 gen_card_pdf.py --payload /tmp/omt_payload.json --zh /tmp/omt_zh.json --out "/tmp/OMT_$(date +%F)_<nextId>.pdf"
+cd $SD && python3 gen_card_pdf.py --payload /tmp/omt_payload.json --zh /tmp/omt_zh.json --out "/tmp/OMT_$(date +%F)_<nextId>_<topicZh>.pdf"
 ```
 
-PDF 规格：A4、卡片式设计、大字号（中文正文 18px、英文 15px、标题 25px）、中英对照、术语表、Noto CJK 字体。
-文件名格式：`OMT_YYYY-MM-DD_<card_id>.pdf`（如 `OMT_2026-06-29_ch01-01.pdf`）。
+PDF 规格：A4、卡片式设计、大字号（中文正文 18px、英文 15px、标题 25px）、中英对照（标题区中文在上、英文小字在下）、术语表、跨平台中文字体。
+文件名格式：`OMT_YYYY-MM-DD_<card_id>_<中文名>.pdf`（如 `OMT_2026-06-29_ch01-01_西方音乐记谱法导论.pdf`）。`<topicZh>` 用翻译后的中文名替换。
 
 ### Step 6：上传 PDF 到 IMA 知识库
 
 ```bash
-cd $SD && python3 upload_ima.py --file "/tmp/OMT_<date>_<nextId>.pdf"
+cd $SD && python3 upload_ima.py --file "/tmp/OMT_<date>_<nextId>_<topicZh>.pdf"
 ```
 
 脚本自动：定位知识库「【权威】音乐制作：风格与流派」→ 定位文件夹「每日一个知识点」→

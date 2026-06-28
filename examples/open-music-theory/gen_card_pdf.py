@@ -38,6 +38,7 @@ def build_html(payload, zh, date_str):
     topic = esc(payload.get('topic', ''))
     src = esc(payload.get('source', ''))
     terms_zh = zh.get('terminologyZh', {})
+    topic_zh = esc(zh.get('topicZh', '')) if zh else ''
 
     sections = []
     # Terminology table
@@ -118,6 +119,7 @@ body {{ font-family: "Microsoft YaHei", "微软雅黑", "PingFang SC", "Hiragino
 .card-head {{ background: linear-gradient(135deg,#1cb0f6,#0969da); color: #fff; padding: 16px 22px; }}
 .card-head .progress {{ font-size: 17px; font-weight: 700; opacity: .92; }}
 .card-head .topic {{ font-size: 25px; font-weight: 800; margin-top: 6px; line-height: 1.3; }}
+.card-head .topic-en {{ font-size: 15px; font-weight: 500; margin-top: 3px; opacity: .82; font-style: italic; }}
 .card-head .chapter {{ display:inline-block; font-size: 13px; background: rgba(255,255,255,.22); padding: 3px 12px; border-radius: 99px; margin-top: 8px; }}
 .sec {{ padding: 14px 22px; border-bottom: 1px solid #f0f1f3; }}
 .sec:last-child {{ border-bottom: none; }}
@@ -142,7 +144,8 @@ body {{ font-family: "Microsoft YaHei", "微软雅黑", "PingFang SC", "Hiragino
 <div class="card">
   <div class="card-head">
     <div class="progress">第 {idx} / {total} 张 · {esc(date_str)}</div>
-    <div class="topic">{topic}</div>
+    <div class="topic">{topic_zh if topic_zh else topic}</div>
+    {('<div class="topic-en">' + topic + '</div>') if topic_zh else ''}
     <span class="chapter">{chapter}</span>
   </div>
   {img_html}
@@ -164,10 +167,14 @@ def main():
     zh = json.load(open(args.zh, encoding='utf-8'))
     date_str = datetime.date.today().isoformat()
     card_id = payload.get('nextId', 'card')
+    topic_zh = zh.get('topicZh', '')
     html_str = build_html(payload, zh, date_str)
     HTML(string=html_str).write_pdf(args.out)
+    import re as _re
+    safe_zh = _re.sub(r'[\\/:*?"<>|]', '_', topic_zh)[:40] if topic_zh else ''
     print(json.dumps({'ok': True, 'pdf': args.out, 'card_id': card_id, 'date': date_str,
-                      'size': os.path.getsize(args.out)}, ensure_ascii=False))
+                      'size': os.path.getsize(args.out), 'topicZh': topic_zh,
+                      'suggestedSuffix': safe_zh}, ensure_ascii=False))
 
 if __name__ == '__main__':
     main()
