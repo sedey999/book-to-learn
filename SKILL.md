@@ -6,7 +6,7 @@ description: |
   英文书自动联网核对术语并实时翻译；中文书无翻译环节。
   四种推送模板：PDF标准卡片、PDF大字闪卡、飞书交互卡片、飞书卡片+图片补充。
   提示词与数据分离，可自由变体为单词学习、诗词海报、新闻讲解等任务。
-version: 1.0.0
+version: 1.1.0
 homepage: https://github.com/sedey999/book-to-learn
 metadata:
   openclaw:
