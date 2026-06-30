@@ -1,18 +1,20 @@
 #!/usr/bin/env python3
 """
-Generate a supplementary image (1:1 or 1:4) from a knowledge point.
+Generate a MINIMAL supplementary image (1:1 or 1:4) — flashcard style.
 Used as a visual supplement to Feishu card messages — NOT for standalone push.
+
+Design: BIG fonts, MINIMAL content. Like a physical flashcard.
+  - Title: huge (40-56px auto-sized)
+  - Quote: large (28-32px)
+  - Terms: large (22-26px)
+  - NO core idea, NO explanation, NO links — just the essentials
+  - 1:1 = 750x750 (square card), 1:4 = 750x3000 (long card)
 
 Usage:
   python gen_image.py --payload <payload.json> [--zh <zh.json>] --out <output.png> [--format <1:1|1:4>] [--language <zh|en>]
 
-Image generation: HTML → weasyprint PDF → pdf2image PNG (sandbox has both).
-Design: card-style, large fonts, colorful sections, rounded corners.
-
-Templates referenced:
-  - Design style inspired by react-paper-memo (github.com/JustinChia/react-paper-memo)
-    large-font printable card concept
-  - Color scheme from book-to-learn's own card design (Duolingo-style)
+Image generation: HTML → weasyprint PDF → pdf2image PNG
+Design inspired by react-paper-memo (github.com/JustinChia/react-paper-memo) large-font card concept.
 """
 import json, sys, os, argparse, datetime, re, html as html_mod, tempfile
 from weasyprint import HTML
@@ -20,19 +22,18 @@ from weasyprint import HTML
 def esc(s):
     return html_mod.escape(s or '', quote=False)
 
-def md_links_to_text(text):
-    return re.sub(r'\[([^\]]+)\]\(([^)]+)\)',
-                  lambda m: '%s (%s)' % (m.group(1), m.group(2)), text or '')
-
-def paras(text, md=False):
-    out = []
-    for ln in (text or '').split('\n'):
-        ln = ln.strip()
-        if ln:
-            p = esc(ln)
-            if md: p = md_links_to_text(p)
-            out.append(p)
-    return out
+def estimate_title_size(topic, fmt='1:1'):
+    """Auto-size title: shorter = bigger. Min 40px."""
+    length = len(topic)
+    base = 56 if fmt == '1:1' else 48
+    if length <= 6:
+        return base
+    elif length <= 10:
+        return base - 8
+    elif length <= 16:
+        return base - 16
+    else:
+        return max(36, base - 24)
 
 def build_html(payload, zh, date_str, language='en', fmt='1:1'):
     idx = payload.get('cardIndex', '?')
@@ -41,35 +42,31 @@ def build_html(payload, zh, date_str, language='en', fmt='1:1'):
     chapter = esc(payload.get('chapter', ''))
     bilingual = language == 'en' and zh
     topic_zh = (zh or {}).get('topicZh', '')
-    topic_display = esc(topic_zh) if (bilingual and topic_zh) else topic
+    main_title = esc(topic_zh) if (bilingual and topic_zh) else topic
+    en_subtitle = topic if (bilingual and topic_zh) else ''
 
-    # dimensions: 1:1 = 750x750, 1:4 = 750x3000
     if fmt == '1:4':
         page_w, page_h = '750px', '3000px'
+        padding = '32px'
     else:
         page_w, page_h = '750px', '750px'
+        padding = '24px'
+
+    title_size = estimate_title_size(main_title, fmt)
 
     sections = []
+
+    # Terms (minimal, large)
     terms_zh = (zh or {}).get('terminologyZh', {})
     if bilingual and terms_zh:
         rows = ''.join('<div class="term-row"><span class="term-en">%s</span> <span class="term-arrow">→</span> <span class="term-cn">%s</span></div>'
-                       % (esc(en), esc(cn)) for en, cn in list(terms_zh.items())[:6])
-        sections.append('<div class="sec"><div class="sec-h" style="color:#cf222e">术语 · Terms</div>%s</div>' % rows)
+                       % (esc(en), esc(cn)) for en, cn in list(terms_zh.items())[:5])
+        sections.append('<div class="sec"><div class="sec-h" style="color:#cf222e">术语</div>%s</div>' % rows)
 
-    def block(title, zh_text, en_text, color, md=False):
-        zh_ps = ''.join('<p>%s</p>' % p for p in paras(zh_text, md=md)) if zh_text else ''
-        en_ps = ''.join('<p class="en">%s</p>' % p for p in paras(en_text, md=md)) if (en_text and bilingual) else ''
-        if not zh_ps and not en_ps: return ''
-        return '<div class="sec"><div class="sec-h" style="color:%s">%s</div><div class="content">%s%s</div></div>' % (color, title, zh_ps, en_ps)
-
-    if bilingual:
-        sections.append(block('核心观点', zh.get('coreIdeaZh',''), payload.get('coreIdea',''), '#1a7f37'))
-        sections.append(block('金句', zh.get('quoteZh',''), payload.get('quote',''), '#8250df'))
-    else:
-        label = '核心观点' if language == 'zh' else 'Core Idea'
-        sections.append(block(label, payload.get('coreIdea',''), '', '#1a7f37'))
-        label3 = '金句' if language == 'zh' else 'Key Quote'
-        sections.append(block(label3, payload.get('quote',''), '', '#8250df'))
+    # Quote only (NO core idea, NO explanation)
+    quote_zh = (zh or {}).get('quoteZh', '') if bilingual else payload.get('quote', '')
+    if quote_zh:
+        sections.append('<div class="sec"><div class="quote-box">%s</div></div>' % esc(quote_zh))
 
     # image
     img_html = ''
@@ -78,43 +75,50 @@ def build_html(payload, zh, date_str, language='en', fmt='1:1'):
 
     body = ''.join(sections)
 
+    # font sizes scale up for 1:4
+    quote_fs = '32px' if fmt == '1:4' else '26px'
+    term_fs = '26px' if fmt == '1:4' else '22px'
+    sec_h_fs = '28px' if fmt == '1:4' else '22px'
+
     html_str = f'''<!DOCTYPE html><html lang="zh"><head><meta charset="UTF-8">
 <style>
 @page {{ size: {page_w} {page_h}; margin: 0; }}
 * {{ box-sizing: border-box; margin: 0; padding: 0; }}
 body {{ font-family: "Microsoft YaHei", "微软雅黑", "PingFang SC", "Hiragino Sans GB", "Noto Sans CJK SC", "SimSun", "宋体", sans-serif; color: #1f2328; width: {page_w}; }}
-.card {{ background: linear-gradient(180deg, #eef2f7 0%, #fff 100%); border-radius: 0; min-height: {page_h}; }}
-.card-head {{ background: linear-gradient(135deg, #1cb0f6, #0969da); color: #fff; padding: 20px 24px; }}
-.card-head .topic {{ font-size: 32px; font-weight: 900; line-height: 1.3; }}
-.card-head .progress {{ font-size: 16px; opacity: .9; margin-bottom: 6px; }}
-.card-head .chapter {{ font-size: 14px; opacity: .8; margin-top: 8px; }}
-.sec {{ padding: 14px 24px; }}
-.sec-h {{ font-size: 18px; font-weight: 800; margin-bottom: 8px; }}
-.content p {{ font-size: 20px; margin-bottom: 8px; line-height: 1.6; }}
-.content p.en {{ font-size: 16px; color: #57606a; font-style: italic; }}
-.term-row {{ font-size: 18px; margin-bottom: 6px; }}
+.card {{ background: linear-gradient(180deg, #eef2f7 0%, #fff 30%, #fff 100%); min-height: {page_h}; display: flex; flex-direction: column; }}
+.card-head {{ background: linear-gradient(135deg, #1cb0f6, #0969da); color: #fff; padding: {padding}; text-align: center; }}
+.card-head .topic {{ font-size: {title_size}px; font-weight: 900; line-height: 1.2; word-break: keep-all; }}
+.card-head .topic-en {{ font-size: 20px; font-weight: 500; margin-top: 8px; opacity: .8; font-style: italic; }}
+.card-head .progress {{ font-size: 18px; opacity: .85; margin-bottom: 12px; }}
+.card-body {{ flex: 1; display: flex; flex-direction: column; justify-content: center; padding: {padding}; }}
+.sec {{ margin-bottom: 24px; }}
+.sec-h {{ font-size: {sec_h_fs}; font-weight: 800; margin-bottom: 12px; }}
+.term-row {{ font-size: {term_fs}; margin-bottom: 10px; line-height: 1.5; }}
 .term-en {{ color: #8a5a00; font-weight: 700; }}
-.term-arrow {{ color: #999; margin: 0 6px; }}
+.term-arrow {{ color: #999; margin: 0 8px; }}
 .term-cn {{ color: #1f2328; }}
-.img-wrap {{ padding: 10px 24px; text-align: center; }}
-.img-wrap img {{ max-width: 90%; border-radius: 10px; border: 1px solid #eee; }}
-.footer {{ padding: 12px 24px; font-size: 14px; color: #8c959f; text-align: center; border-top: 1px solid #eee; }}
+.quote-box {{ font-size: {quote_fs}; font-style: italic; color: #5b3b8c; line-height: 1.5; text-align: center; padding: 16px 0; }}
+.img-wrap {{ text-align: center; margin-bottom: 20px; }}
+.img-wrap img {{ max-width: 85%; border-radius: 12px; border: 1px solid #eee; }}
+.footer {{ padding: 16px {padding}; font-size: 16px; color: #8c959f; text-align: center; border-top: 1px solid #eee; }}
 </style></head><body>
 <div class="card">
   <div class="card-head">
-    <div class="progress">第 {idx} / {total} 张 · {esc(date_str)}</div>
-    <div class="topic">{topic_display}</div>
-    <div class="chapter">{chapter}</div>
+    <div class="progress">第 {idx} / {total} 张</div>
+    <div class="topic">{main_title}</div>
+    {('<div class="topic-en">' + en_subtitle + '</div>') if en_subtitle else ''}
   </div>
-  {img_html}
-  {body}
-  <div class="footer">book-to-learn · {esc(date_str)}</div>
+  <div class="card-body">
+    {img_html}
+    {body}
+  </div>
+  <div class="footer">{esc(date_str)}</div>
 </div>
 </body></html>'''
     return html_str
 
 def main():
-    ap = argparse.ArgumentParser(description='Generate supplementary image (1:1 or 1:4)')
+    ap = argparse.ArgumentParser(description='Generate minimal flashcard image (1:1 or 1:4)')
     ap.add_argument('--payload', required=True)
     ap.add_argument('--zh', help='translation JSON (for English books)')
     ap.add_argument('--out', required=True, help='output PNG path')
@@ -126,12 +130,10 @@ def main():
     language = args.language or payload.get('language', 'en')
     date_str = datetime.date.today().isoformat()
 
-    # Step 1: HTML → PDF (temporary)
     html_str = build_html(payload, zh, date_str, language=language, fmt=args.format)
     tmp_pdf = tempfile.mktemp(suffix='.pdf')
     HTML(string=html_str).write_pdf(tmp_pdf)
 
-    # Step 2: PDF → PNG (pdf2image)
     try:
         from pdf2image import convert_from_path
         images = convert_from_path(tmp_pdf, dpi=150)
