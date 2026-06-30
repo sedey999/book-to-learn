@@ -54,8 +54,13 @@ sudo pip3 install weasyprint python-docx beautifulsoup4 ebooklib pypdf pdfminer.
 ```bash
 cd /tmp && curl -sL -o ima-skills.zip "https://app-dl.ima.qq.com/skills/ima-skills-1.1.7.zip"
 mkdir -p ima-skills-extracted && unzip -o ima-skills.zip -d ima-skills-extracted >/dev/null 2>&1
-cp -r ima-skills-extracted/ima-skill /root/.codebuddy/skills/ima-skill
+# 安装到你的平台对应的 skills 目录（任选一个）：
+cp -r ima-skills-extracted/ima-skill ~/.codebuddy/skills/ima-skill   # CodeBuddy
+# 或: cp -r ima-skills-extracted/ima-skill ~/.openclaw/skills/ima-skill   # OpenClaw
+# 或: cp -r ima-skills-extracted/ima-skill ~/.claude/skills/ima-skill     # Claude Code
+# 或: cp -r ima-skills-extracted/ima-skill ~/.agents/skills/ima-skill     # Amp / 跨 agent
 ```
+> upload_ima.py 会自动在 `~/.codebuddy`、`~/.openclaw`、`~/.claude`、`~/.copilot`、`~/.agents` 等路径下查找 ima-skill，也可用环境变量 `IMA_SKILL_DIR` 显式指定。
 API Key 获取：https://ima.qq.com/agent-interface
 ```bash
 mkdir -p ~/.config/ima
@@ -70,7 +75,7 @@ printf '%s' "<API Key>" > ~/.config/ima/api_key
 
 ## 阶段一：拆书（首次对每本书执行）
 
-SKILL_DIR = `/root/.codebuddy/skills/book-to-learn`。下面 `$SD` 代表 SKILL_DIR。
+> **SKILL_DIR**：本 skill 所在目录。各平台路径不同（CodeBuddy: `~/.codebuddy/skills/book-to-learn`，OpenClaw: `~/.openclaw/skills/book-to-learn`，Claude Code: `~/.claude/skills/book-to-learn` 等）。脚本内已用 `os.path.dirname(os.path.abspath(__file__))` 自动定位，无需手动指定。下面 `$SD` 代表 SKILL_DIR。
 
 ### Step 1：提取文本
 ```bash
@@ -148,18 +153,23 @@ cd $SD && python3 book_setup.py prompt --slug <book-slug>
    ```bash
    cd $SD && python3 push_card.py next --book <slug> --force > /tmp/b2l_payload.json
    ```
+   > Windows 平台 `/tmp/` 不存在，改用 `%TEMP%` 或脚本输出建议的临时目录。
    解析输出。skip=true 则结束。
 
-2. **联网核对术语**：对 terminology 数组每个术语用 WebSearch 查权威中文译法，汇总 terminologyZh。必须核对。
+2. **联网核对术语**：对 terminology 数组每个术语，**使用当前环境中可用的联网搜索工具**查权威中文译法，汇总 terminologyZh。必须联网核对，不可凭记忆。
+   - 优先使用环境原生搜索工具（如 WebSearch、SearXNG skill 等）
+   - 若环境有多个搜索工具，任选可用者
+   - 若环境无搜索工具，告知用户需配置搜索能力后结束
 
-3. **实时翻译**：coreIdea/explanation/quote/application 译为中文。explanation 按换行分段对应；术语首次出现「中文（英文）」；explanation/application 含 markdown 链接的保留 url 仅译 text；翻译 relatedLinks 标题生成 relatedLinksZh。
+3. **实时翻译**：coreIdea/explanation/quote/application 译为中文。explanation 按换行分段对应；术语首次出现「中文（英文）」；explanation/application 含 markdown 链接的保留 url 仅译 text；翻译 relatedLinks 标题生成 relatedLinksZh；**同时翻译 topic（知识点标题）为 topicZh**。
 
-4. **写翻译 JSON** 到 `/tmp/b2l_zh.json`（含 coreIdeaZh/explanationZh/quoteZh/applicationZh/terminologyZh/relatedLinksZh/note）。
+4. **写翻译 JSON** 到临时目录的 `b2l_zh.json`（含 topicZh/coreIdeaZh/explanationZh/quoteZh/applicationZh/terminologyZh/relatedLinksZh/note）。
 
-5. **生成 PDF**：
+5. **生成 PDF**（文件名末尾带知识点中文名）：
    ```bash
-   cd $SD && python3 gen_card_pdf.py --payload /tmp/b2l_payload.json --zh /tmp/b2l_zh.json --out "/tmp/<PREFIX>_$(date +%F)_<nextId>.pdf" --language en
+   cd $SD && python3 gen_card_pdf.py --payload <payload路径> --zh <zh路径> --out "<临时目录>/<PREFIX>_$(date +%F)_<nextId>_<topicZh>.pdf" --language en
    ```
+   PDF 标题区显示中英对照（中文在上，英文小字在下）。`<topicZh>` 用翻译后的中文名替换（去除文件名非法字符）。
 
 6. **推送**（按 config.pushMethod）：
    - IMA：`python3 upload_ima.py --file "<pdf>" --config books/<slug>/config.json --book-dir books/<slug>`
@@ -174,10 +184,11 @@ cd $SD && python3 book_setup.py prompt --slug <book-slug>
 
 1. **取载荷**：同上。
 2. **跳过翻译**（步骤 2-4 不执行）。
-3. **生成 PDF**：
+3. **生成 PDF**（文件名末尾带知识点中文名）：
    ```bash
-   cd $SD && python3 gen_card_pdf.py --payload /tmp/b2l_payload.json --out "/tmp/<PREFIX>_$(date +%F)_<nextId>.pdf" --language zh
+   cd $SD && python3 gen_card_pdf.py --payload <payload路径> --out "<临时目录>/<PREFIX>_$(date +%F)_<nextId>_<topic>.pdf" --language zh
    ```
+   中文书的 topic 本身即中文名，直接用于文件名。
 4. **推送**：同上（飞书则 `--language zh`，不传 --zh）。
 5. **记录进度**：同上。
 6. **汇报**：第 X/N 张、主题。

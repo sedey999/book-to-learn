@@ -13,11 +13,46 @@ On auth failure: calls notify_failure.py, exits with code 2.
 import json, sys, os, subprocess, argparse, datetime
 
 BASE = os.path.dirname(os.path.abspath(__file__))
-IMA_SKILL_DIR = '/root/.codebuddy/skills/ima-skill'
-IMA_API = os.path.join(IMA_SKILL_DIR, 'ima_api.cjs')
-PREFLIGHT = os.path.join(IMA_SKILL_DIR, 'knowledge-base', 'scripts', 'preflight-check.cjs')
-COS_UPLOAD = os.path.join(IMA_SKILL_DIR, 'knowledge-base', 'scripts', 'cos-upload.cjs')
-NODE = '/usr/bin/node'
+
+def find_ima_skill_dir():
+    """Dynamically locate ima-skill across platforms and skill roots."""
+    home = os.path.expanduser('~')
+    candidates = [
+        os.environ.get('IMA_SKILL_DIR', ''),           # explicit env override
+        os.path.join(home, '.codebuddy', 'skills', 'ima-skill'),   # CodeBuddy
+        os.path.join(home, '.openclaw', 'skills', 'ima-skill'),    # OpenClaw
+        os.path.join(home, '.claude', 'skills', 'ima-skill'),      # Claude Code
+        os.path.join(home, '.copilot', 'skills', 'ima-skill'),     # GitHub Copilot CLI
+        os.path.join(home, '.agents', 'skills', 'ima-skill'),      # Amp / cross-agent
+        os.path.join(home, '.config', 'agents', 'skills', 'ima-skill'),
+        os.path.join(home, '.config', 'amp', 'skills', 'ima-skill'),
+    ]
+    for c in candidates:
+        if c and os.path.isfile(os.path.join(c, 'ima_api.cjs')):
+            return c
+    return None
+
+IMA_SKILL_DIR = find_ima_skill_dir()
+if IMA_SKILL_DIR:
+    IMA_API = os.path.join(IMA_SKILL_DIR, 'ima_api.cjs')
+    PREFLIGHT = os.path.join(IMA_SKILL_DIR, 'knowledge-base', 'scripts', 'preflight-check.cjs')
+    COS_UPLOAD = os.path.join(IMA_SKILL_DIR, 'knowledge-base', 'scripts', 'cos-upload.cjs')
+else:
+    IMA_API = PREFLIGHT = COS_UPLOAD = None
+
+def find_node():
+    """Find a working node binary (skip bun shims)."""
+    for candidate in ['/usr/bin/node', '/usr/local/bin/node']:
+        if os.path.isfile(candidate):
+            return candidate
+    # try nvm
+    home = os.path.expanduser('~')
+    import glob
+    for p in sorted(glob.glob(os.path.join(home, '.nvm', 'versions', 'node', '*', 'bin', 'node')), reverse=True):
+        return p
+    return 'node'  # fallback
+
+NODE = find_node()
 
 def run(cmd, input_str=None):
     env = dict(os.environ)
@@ -80,6 +115,9 @@ def notify_failure(book_dir, config, reason):
                     '--config', cfg_path], capture_output=True, timeout=30)
 
 def upload(file_path, config, book_dir=None):
+    if not IMA_SKILL_DIR:
+        print(json.dumps({'ok': False, 'error': 'ima-skill not found. Set IMA_SKILL_DIR env or install to ~/.codebuddy/skills/ima-skill (or ~/.openclaw, ~/.claude, ~/.copilot, ~/.agents)'}, ensure_ascii=False))
+        return 1
     ima_cfg = config.get('ima', {})
     kb_name = ima_cfg.get('kbName', '')
     folder_name = ima_cfg.get('folderName', '')

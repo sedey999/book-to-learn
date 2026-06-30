@@ -234,40 +234,44 @@ def cmd_prompt(args):
     push_method = config.get('pushMethod', 'ima')
     slug = args.slug
 
+    sd = SKILL_DIR  # dynamic skill directory
+    import tempfile
+    tmp = tempfile.gettempdir()
     prompt = f"""执行 book-to-learn skill：推送《{config.get('bookTitle',slug)}》今日知识点卡片。
 书目录：{bd}
+skill目录：{sd}
 语言：{'英文（需翻译）' if language=='en' else '中文（无需翻译）'}
 推送方式：{push_method}
 
 严格按以下步骤执行：
 
-1. cd /root/.codebuddy/skills/book-to-learn && python3 push_card.py next --book {slug} --force > /tmp/b2l_payload.json
+1. cd {sd} && python3 push_card.py next --book {slug} --force > {tmp}/b2l_payload.json
    解析输出。若 skip=true（all_done/weekend/already_pushed），告知并结束。
 
 2. 从载荷提取 nextId、terminology、coreIdea、explanation、quote、application、relatedLinks。"""
     if language == 'en':
-        prompt += """
-3. 【仅英文书】对 terminology 数组每个术语用 WebSearch 联网查询音乐/专业领域权威中文译法，汇总为 terminologyZh。必须核对不可凭记忆。
-4. 【仅英文书】将 coreIdea/explanation/quote/application 翻译为简体中文：explanation 按换行分段对应；术语首次出现用「中文（英文）」；explanation/application 含 markdown 链接的保留 url 仅译 text；翻译 relatedLinks 标题生成 relatedLinksZh。
-5. 写翻译 JSON 到 /tmp/b2l_zh.json（含 coreIdeaZh/explanationZh/quoteZh/applicationZh/terminologyZh/relatedLinksZh/note）。"""
+        prompt += f"""
+3. 【仅英文书】对 terminology 数组每个术语，使用当前环境中可用的联网搜索工具（WebSearch / SearXNG / 其他搜索 skill）查询其在专业领域的权威中文译法，汇总为 terminologyZh。必须联网核对，不可凭记忆。若环境无搜索工具，告知用户需配置搜索能力。
+4. 【仅英文书】将 coreIdea/explanation/quote/application 翻译为简体中文：explanation 按换行分段对应；术语首次出现用「中文（英文）」；explanation/application 含 markdown 链接的保留 url 仅译 text；翻译 relatedLinks 标题生成 relatedLinksZh；**同时翻译 topic（知识点标题）为 topicZh**。
+5. 写翻译 JSON 到 {tmp}/b2l_zh.json（含 topicZh/coreIdeaZh/explanationZh/quoteZh/applicationZh/terminologyZh/relatedLinksZh/note）。"""
     else:
-        prompt += """
+        prompt += f"""
 3. 【中文书】跳过翻译环节，无需写翻译 JSON。"""
     prompt += f"""
-{6 if language=='en' else 4}. 生成卡片式 PDF：
-   cd /root/.codebuddy/skills/book-to-learn && python3 gen_card_pdf.py --payload /tmp/b2l_payload.json {"--zh /tmp/b2l_zh.json" if language=='en' else ""} --out "/tmp/{config.get('cardPrefix','BOOK')}_$(date +%F)_<nextId>.pdf" --language {language}
+{6 if language=='en' else 4}. 生成卡片式 PDF（文件名末尾带知识点中文名）：
+   cd {sd} && python3 gen_card_pdf.py --payload {tmp}/b2l_payload.json {"--zh "+tmp+"/b2l_zh.json" if language=='en' else ""} --out "{tmp}/{config.get('cardPrefix','BOOK')}_$(date +%F)_<nextId>_<{('topicZh' if language=='en' else 'topic')}>.pdf" --language {language}
 
 {7 if language=='en' else 5}. 推送：
 """
     if push_method == 'ima':
-        prompt += f"""   cd /root/.codebuddy/skills/book-to-learn && python3 upload_ima.py --file "/tmp/{config.get('cardPrefix','BOOK')}_<date>_<nextId>.pdf" --config {bd}/config.json --book-dir {bd}
+        prompt += f"""   cd {sd} && python3 upload_ima.py --file "{tmp}/{config.get('cardPrefix','BOOK')}_<date>_<nextId>.pdf" --config {bd}/config.json --book-dir {bd}
    退出码 0=成功继续下一步；2=密钥失效（已发通知）不计进度结束；1=其他错误不更新进度结束。"""
     else:
-        prompt += f"""   cd /root/.codebuddy/skills/book-to-learn && python3 send_feishu.py --payload /tmp/b2l_payload.json {"--zh /tmp/b2l_zh.json" if language=='en' else ""} --config {bd}/config.json --language {language}
+        prompt += f"""   cd {sd} && python3 send_feishu.py --payload {tmp}/b2l_payload.json {"--zh "+tmp+"/b2l_zh.json" if language=='en' else ""} --config {bd}/config.json --language {language}
    sent=true ok=true 则成功。"""
     prompt += f"""
 {8 if language=='en' else 6}. 仅成功后记录进度：
-   cd /root/.codebuddy/skills/book-to-learn && python3 push_card.py mark --book {slug} <nextId> success
+   cd {sd} && python3 push_card.py mark --book {slug} <nextId> success
 
 {9 if language=='en' else 7}. 汇报：今日推送第 X/N 张、主题、{"术语核对要点、" if language=='en' else ""}已推送至{"IMA知识库" if push_method=='ima' else "飞书"}。"""
     print(prompt)
