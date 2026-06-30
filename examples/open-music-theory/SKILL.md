@@ -106,21 +106,31 @@ cd $SD && python3 push_card.py next --force > /tmp/omt_payload.json
 
 ### Step 2：联网核对术语中文译法
 
-对 `terminology` 数组中每个英文术语，使用 WebSearch 联网查询其在**音乐理论领域**的权威中文译法。
+对 `terminology` 数组中每个英文术语，使用联网搜索查询其在**音乐理论领域**的权威中文译法。
 检索词示例：`music theory <term> 中文 译名` 或 `<term> 乐理 术语`。
 汇总为 `terminologyZh` 对象 `{"英文术语": "中文译法"}`。**必须核对，不可凭记忆。**
 
 ### Step 3：实时翻译
 
-将 coreIdeaEn / explanationEn / quoteEn / applicationScenarios 翻译为准确流畅的简体中文：
+将 coreIdeaEn / explanationEn / quoteEn / applicationScenarios 翻译为简体中文：
 - explanationEn 按 `\n` 分段翻译，保持段落一一对应
 - 专业术语首次出现采用「中文（英文）」格式
 - 译文准确专业，符合乐理表达习惯
 - **explanationEn / applicationScenarios 中可能含 markdown 链接 `[text](url)`**：翻译时**保留 `[...](url)` 结构和 url 不变**，仅将方括号内的 text 翻译为中文（如 `["How was Musical Notation Invented?"](https://...)` → `[「音乐记谱法是如何发明的？」](https://...)`）；文件格式名 `pdf`/`docx` 等不翻译
-- **翻译 relatedLinks 的标题**：对载荷 `relatedLinks` 数组中每个链接的 `text`（英文原文标题）翻译为中文，生成 `relatedLinksZh` 数组
-- **翻译知识点标题**：将载荷 `topic` 翻译为中文，作为 `topicZh` 字段
+- **中文部分必须使用中文引号「」**，禁止英文直引号 `" "`
+- 翻译 relatedLinks 的标题为中文
+- 翻译 topic（知识点主题）为中文，作为 `topicZh` 字段，用于 PDF 文件名
 
-### Step 4：写翻译 JSON
+### Step 4：翻译质量全面检查
+
+在写入 JSON 前，逐项检查：
+- ✅ 中文部分是否全部使用中文引号「」，没有英文直引号 `" "`
+- ✅ 语义准确、流畅自然，没有生硬机翻
+- ✅ markdown 链接结构完整，段落一一对应
+- ✅ topicZh 翻译准确，将用于 PDF 文件名
+- 发现问题立即修正
+
+### Step 5：写翻译 JSON
 
 将翻译结果写入 `/tmp/omt_zh.json`：
 ```json
@@ -139,40 +149,41 @@ cd $SD && python3 push_card.py next --force > /tmp/omt_payload.json
 }
 ```
 
-### Step 5：生成卡片式 PDF（文件名末尾带知识点中文名）
+### Step 6：生成卡片式 PDF
 
 ```bash
-cd $SD && python3 gen_card_pdf.py --payload /tmp/omt_payload.json --zh /tmp/omt_zh.json --out "/tmp/OMT_$(date +%F)_<nextId>_<topicZh>.pdf"
+cd $SD && python3 gen_card_pdf.py --payload /tmp/omt_payload.json --zh /tmp/omt_zh.json
 ```
+从输出中提取生成的 PDF 路径（pdf 字段），保存为 PDF_PATH 变量。
 
 PDF 规格：A4、卡片式设计、大字号（中文正文 18px、英文 15px、标题 25px）、中英对照（标题区中文在上、英文小字在下）、术语表、跨平台中文字体。
-文件名格式：`OMT_YYYY-MM-DD_<card_id>_<中文名>.pdf`（如 `OMT_2026-06-29_ch01-01_西方音乐记谱法导论.pdf`）。`<topicZh>` 用翻译后的中文名替换。
+文件名格式：`OMT_YYYY-MM-DD_<card_id>_<中文名>.pdf`（如 `OMT_2026-06-29_ch01-01_西方音乐记谱法导论.pdf`）。
 
-### Step 6：上传 PDF 到 IMA 知识库
+### Step 7：上传主 PDF 到 IMA 知识库
 
 ```bash
-cd $SD && python3 upload_ima.py --file "/tmp/OMT_<date>_<nextId>_<topicZh>.pdf"
+cd $SD && python3 upload_ima.py --file "$PDF_PATH"
 ```
 
 脚本自动：定位知识库「【权威】音乐制作：风格与流派」→ 定位文件夹「每日一个知识点」→
 preflight 检查 → 重名检查 → create_media → COS 上传 → add_knowledge。
 
 **退出码含义**：
-- `0` → 上传成功
-- `1` → 其他错误（已输出错误详情）
-- `2` → **IMA 密钥失效**（已自动发飞书通知，本次不计入进度，结束）
+- `0` → 上传成功，继续下一步
+- `1` → 其他错误（已输出错误详情），不更新进度，报告错误后结束
+- `2` → **IMA 密钥失效**（已自动发飞书通知），本次不计进度，告知用户后结束
 
-**若返回码 2（密钥失效）**：飞书 webhook 已发送通知。告知用户"已通过飞书通知索取新密钥，本次推送未完成不计入进度，凭证更新后下次自动重推同一张"。**不要执行 Step 7**，直接结束。
-
-**若返回码 1（其他错误）**：报告错误，**不执行 Step 7**，结束。
-
-### Step 7：记录推送进度（仅上传成功后）
+### Step 8：记录推送进度（仅上传成功后）
 
 ```bash
 cd $SD && python3 push_card.py mark <nextId> success
 ```
 
-### Step 8：汇报
+### Step 9：更新 daily-progress.md 进度文件
+
+追加当天推送记录到 `daily-progress.md`。
+
+### Step 10：汇报
 
 简短汇报：今日推送第 X/118 张、卡片主题、术语核对要点、PDF 已上传至 IMA 知识库。
 
@@ -193,6 +204,7 @@ cd $SD && python3 push_card.py mark <nextId> success
 | `gen_card_pdf.py` | 生成卡片式双语 PDF（weasyprint） |
 | `upload_ima.py` | 上传 PDF 到 IMA 知识库文件夹（含密钥失效检测） |
 | `notify_key_expired.py` | 密钥失效时发飞书 webhook 通知 |
+| `normalize_quotes.py` | 中文引号自动规范化（杜绝英文直引号混入） |
 | `items.json` | 118 个知识点知识库 |
 | `index.json` | 卡片推送顺序索引 |
 | `progress.json` | 推送进度（自动维护） |

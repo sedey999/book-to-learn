@@ -156,7 +156,7 @@ cd $SD && python3 book_setup.py prompt --slug <book-slug>
    - 若环境有多个搜索工具，任选可用者
    - 若环境无搜索工具，告知用户需配置搜索能力后结束
 
-3. **实时翻译**：coreIdea/explanation/quote/application 译为中文。explanation 按换行分段对应；术语首次出现「中文（英文）」；explanation/application 含 markdown 链接的保留 url 仅译 text；翻译 relatedLinks 标题生成 relatedLinksZh；**同时翻译 topic（知识点标题）为 topicZh**。
+3. **实时翻译**：coreIdea/explanation/quote/application 译为中文。explanation 按换行分段对应；术语首次出现「中文（英文）」；explanation/application 含 markdown 链接的保留 url 仅译 text；翻译 relatedLinks 标题生成 relatedLinksZh；**同时翻译 topic（知识点标题）为 topicZh**。**注意：翻译后的中文文本必须使用中文双引号「」或 ""（U+201C/U+201D），不得使用英文直引号 ""。若不确定 Unicode 输入方式，写入 JSON 时会由 normalize_quotes.py 自动修正。**
 
 4. **写翻译 JSON** 到临时目录的 `b2l_zh.json`（含 topicZh/coreIdeaZh/explanationZh/quoteZh/applicationZh/terminologyZh/relatedLinksZh/note）。
 
@@ -296,4 +296,5 @@ send_feishu.py 构造飞书 interactive 卡片 JSON，POST 到 webhook。
 - 失败绝不计进度，确保下次重推同一张
 - PDF 文件名日期格式统一 `YYYY-MM-DD`
 - 英文书翻译质量优先：术语必须联网核对
+- **中文引号规范**：所有脚本内置 `normalize_quotes.py`，自动将英文直引号 `""` 转换为中文双引号 `""`（U+201C/U+201D）。即使 AI 翻译输出的 JSON 含英文引号，PDF 和飞书卡片最终输出也会被自动修正。中文书的 `items.json` 中若含英文引号，同样会被自动修正。
 - 假设不同用户使用：所有配置在 config.json，不硬编码

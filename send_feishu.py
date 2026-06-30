@@ -11,6 +11,7 @@ free image host (catbox.moe, no registration) and embed the URL.
 Falls back to appending image URL as text if upload fails.
 """
 import json, sys, os, argparse, urllib.request, urllib.parse, base64, re, subprocess
+from normalize_quotes import normalize_all
 
 def load_config(path):
     return json.load(open(path, encoding='utf-8'))
@@ -194,6 +195,7 @@ def main():
         print(json.dumps({'ok': False, 'error': 'feishu.webhook not set in config.json'}, ensure_ascii=False))
         sys.exit(1)
     language = args.language or payload.get('language', 'en')
+    zh, payload = normalize_all(zh, payload, language)  # 规范化中文引号
     card = build_card(payload, zh, language)
     sys.exit(send(webhook, card))
 

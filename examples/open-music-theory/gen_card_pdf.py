@@ -9,6 +9,7 @@ designed for readability. Filename convention: OMT_<YYYY-MM-DD>_<id>.pdf
 """
 import json, sys, os, argparse, datetime, re, html as html_mod
 from weasyprint import HTML
+from normalize_quotes import normalize_all
 
 def esc(s):
     return html_mod.escape(s or '', quote=False)
@@ -165,6 +166,7 @@ def main():
     args = ap.parse_args()
     payload = json.load(open(args.payload, encoding='utf-8'))
     zh = json.load(open(args.zh, encoding='utf-8'))
+    zh, payload = normalize_all(zh, payload, 'en')  # 规范化中文引号
     date_str = datetime.date.today().isoformat()
     card_id = payload.get('nextId', 'card')
     topic_zh = zh.get('topicZh', '')

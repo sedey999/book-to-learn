@@ -17,6 +17,7 @@ Usage:
 """
 import json, sys, os, argparse, datetime, re, html as html_mod
 from weasyprint import HTML
+from normalize_quotes import normalize_all
 
 def esc(s):
     return html_mod.escape(s or '', quote=False)
@@ -152,6 +153,7 @@ def main():
     payload = json.load(open(args.payload, encoding='utf-8'))
     zh = json.load(open(args.zh, encoding='utf-8')) if args.zh else None
     language = args.language or payload.get('language', 'en')
+    zh, payload = normalize_all(zh, payload, language)  # 规范化中文引号
     date_str = datetime.date.today().isoformat()
     card_id = payload.get('nextId', 'card')
     topic_zh = (zh or {}).get('topicZh', '')
