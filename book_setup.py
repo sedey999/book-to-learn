@@ -63,6 +63,9 @@ def cmd_init(args):
         'notifyWebhook': '',
         'granularity': args.granularity,
         'cardPrefix': args.prefix or 'BOOK',
+        'template': 'pdf-standard',  # pdf-standard | pdf-large | feishu-card | feishu-card+image
+        'imageFormat': '1:1',  # 1:1 | 1:4 (only for image supplement)
+        'testPush': False,  # whether to do a test push after setup
         'createdAt': __import__('datetime').date.today().isoformat(),
     }
     with open(cfg_path, 'w', encoding='utf-8') as f:
@@ -177,7 +180,17 @@ def cmd_gen_index(args):
     if not os.path.exists(prog_path):
         with open(prog_path, 'w', encoding='utf-8') as f:
             json.dump({'lastPushedId': None, 'lastPushDate': None, 'pushHistory': []}, f, ensure_ascii=False, indent=2)
-    print(json.dumps({'ok': True, 'totalCards': len(items), 'slug': args.slug}, ensure_ascii=False))
+    # create daily-progress.md if not exists
+    dp_path = os.path.join(bd, 'daily-progress.md')
+    if not os.path.exists(dp_path):
+        title = config.get('bookTitle', args.slug)
+        total = len(items)
+        with open(dp_path, 'w', encoding='utf-8') as f:
+            f.write(f'# {title} — 每日学习进度\n\n')
+            f.write(f'> 共 {total} 个知识点 | 每次推送成功后追加一行记录\n\n')
+            f.write(f'| 日期 | 序号 | 卡片ID | 主题 | 推送方式 | 状态 |\n')
+            f.write(f'|------|------|--------|------|----------|------|\n')
+    print(json.dumps({'ok': True, 'totalCards': len(items), 'slug': args.slug, 'dailyProgress': dp_path}, ensure_ascii=False))
 
 def cmd_download_imgs(args):
     """Download images referenced in items.json, embed as base64 data URIs."""
@@ -226,6 +239,110 @@ def cmd_download_imgs(args):
         json.dump(items, f, ensure_ascii=False, indent=2)
     print(json.dumps({'ok': True, 'downloaded': len(url_map), 'embedded': updated, 'slug': args.slug}, ensure_ascii=False))
 
+def cmd_summary(args):
+    """Print a detailed configuration summary for user confirmation."""
+    bd = book_dir(args.slug)
+    config = json.load(open(os.path.join(bd, 'config.json'), encoding='utf-8'))
+    items = []
+    items_path = os.path.join(bd, 'items.json')
+    if os.path.exists(items_path):
+        items = json.load(open(items_path, encoding='utf-8'))
+    progress = {'lastPushedId': None, 'pushHistory': []}
+    prog_path = os.path.join(bd, 'progress.json')
+    if os.path.exists(prog_path):
+        progress = json.load(open(prog_path, encoding='utf-8'))
+
+    template_names = {
+        'pdf-standard': 'PDF 标准卡片（长文，多字小字，中英对照）',
+        'pdf-large': 'PDF 大字卡片（A4，正文≥18px，标题超大，适合单词/术语）',
+        'feishu-card': '飞书交互式卡片（文字排版）',
+        'feishu-card+image': '飞书卡片 + 图片补充（1:1或1:4图片随卡片发送）',
+    }
+    pushed = len(progress.get('pushHistory', []))
+    total = len(items)
+    has_img = sum(1 for it in items if it.get('image', '').startswith('data:'))
+    has_links = sum(1 for it in items if it.get('relatedLinks'))
+    has_terms = sum(1 for it in items if it.get('terminology'))
+
+    lines = []
+    lines.append(f'═══════════════════════════════════════════════════')
+    lines.append(f'  📖 《{config.get("bookTitle", args.slug)}》 配置确认')
+    lines.append(f'═══════════════════════════════════════════════════')
+    lines.append(f'')
+    lines.append(f'【基本信息】')
+    lines.append(f'  书名：{config.get("bookTitle", "")}')
+    lines.append(f'  Slug：{config.get("bookSlug", args.slug)}')
+    lines.append(f'  语言：{"中文（无翻译）" if config.get("language")=="zh" else "英文（需联网核对术语+翻译）"}')
+    lines.append(f'  拆解粒度：{config.get("granularity", "chapter")}')
+    lines.append(f'  数据目录：{bd}')
+    lines.append(f'')
+    lines.append(f'【卡片转化情况】')
+    lines.append(f'  知识点总数：{total}')
+    lines.append(f'  含配图：{has_img} 张')
+    lines.append(f'  含相关链接：{has_links} 张')
+    lines.append(f'  含术语表：{has_terms} 张')
+    lines.append(f'  推送周期：每工作日 1 张，约 {total // 5} 周')
+    lines.append(f'  已推送：{pushed} / {total}')
+    lines.append(f'')
+    lines.append(f'【推送方式】')
+    lines.append(f'  模板：{config.get("template", "pdf-standard")} → {template_names.get(config.get("template","pdf-standard"), "未知")}')
+    lines.append(f'  推送通道：{config.get("pushMethod", "ima")}')
+    if config.get('pushMethod') == 'ima':
+        lines.append(f'  IMA 知识库：{config.get("ima", {}).get("kbName", "⚠️ 未设置")}')
+        lines.append(f'  目标文件夹：{config.get("ima", {}).get("folderName", "⚠️ 未设置")}')
+    else:
+        lines.append(f'  飞书 Webhook：{config.get("feishu", {}).get("webhook", "⚠️ 未设置")[:50]}...')
+    if config.get("imageFormat"):
+        lines.append(f'  图片格式：{config.get("imageFormat")}')
+    lines.append(f'  测试推送：{"是" if config.get("testPush") else "否"}')
+    lines.append(f'')
+    lines.append(f'【失败通知】')
+    lines.append(f'  通知 Webhook：{config.get("notifyWebhook", "⚠️ 未设置")[:50]}{"..." if len(config.get("notifyWebhook",""))>50 else ""}')
+    lines.append(f'')
+    lines.append(f'【文件清单】')
+    for fn in ['config.json', 'items.json', 'index.json', 'progress.json', 'daily-progress.md']:
+        p = os.path.join(bd, fn)
+        if os.path.exists(p):
+            lines.append(f'  ✅ {fn} ({os.path.getsize(p)} bytes)')
+        else:
+            lines.append(f'  ❌ {fn} (未生成)')
+    cards_dir = os.path.join(bd, 'cards')
+    if os.path.isdir(cards_dir):
+        lines.append(f'  ✅ cards/ ({len(os.listdir(cards_dir))} 张)')
+    img_dir = os.path.join(bd, 'images')
+    if os.path.isdir(img_dir):
+        lines.append(f'  ✅ images/ ({len(os.listdir(img_dir))} 张)')
+    lines.append(f'')
+    lines.append(f'═══════════════════════════════════════════════════')
+    lines.append(f'  请确认以上配置是否正确。如需调整，修改 {bd}/config.json')
+    lines.append(f'  确认无误后，运行 prompt 命令获取定时任务提示词：')
+    lines.append(f'  python3 book_setup.py prompt {args.slug}')
+    lines.append(f'═══════════════════════════════════════════════════')
+    print('\n'.join(lines))
+
+def cmd_log_progress(args):
+    """Append a record to daily-progress.md after a successful push."""
+    bd = book_dir(args.slug)
+    dp_path = os.path.join(bd, 'daily-progress.md')
+    config = json.load(open(os.path.join(bd, 'config.json'), encoding='utf-8'))
+    items = json.load(open(os.path.join(bd, 'items.json'), encoding='utf-8'))
+    card_id = args.card_id
+    item = next((it for it in items if it['id'] == card_id), {})
+    topic = item.get('topic', '')
+    # find card index
+    index = json.load(open(os.path.join(bd, 'index.json'), encoding='utf-8'))
+    card_index = '?'
+    for i, fn in enumerate(index.get('items', [])):
+        if card_id in fn:
+            card_index = i + 1
+            break
+    today = __import__('datetime').date.today().isoformat()
+    push_method = config.get('pushMethod', 'ima')
+    row = f'| {today} | {card_index}/{index.get("totalCards","?")} | {card_id} | {topic} | {push_method} | ✅ 成功 |\n'
+    with open(dp_path, 'a', encoding='utf-8') as f:
+        f.write(row)
+    print(json.dumps({'ok': True, 'logged': card_id, 'date': today, 'file': dp_path}, ensure_ascii=False))
+
 def cmd_prompt(args):
     """Output the cron task prompt for this book."""
     bd = book_dir(args.slug)
@@ -270,10 +387,11 @@ skill目录：{sd}
         prompt += f"""   cd {sd} && python3 send_feishu.py --payload {tmp}/b2l_payload.json {"--zh "+tmp+"/b2l_zh.json" if language=='en' else ""} --config {bd}/config.json --language {language}
    sent=true ok=true 则成功。"""
     prompt += f"""
-{8 if language=='en' else 6}. 仅成功后记录进度：
+{8 if language=='en' else 6}. 仅成功后记录进度（两步）：
    cd {sd} && python3 push_card.py mark --book {slug} <nextId> success
+   cd {sd} && python3 book_setup.py log-progress {slug} --card-id <nextId>
 
-{9 if language=='en' else 7}. 汇报：今日推送第 X/N 张、主题、{"术语核对要点、" if language=='en' else ""}已推送至{"IMA知识库" if push_method=='ima' else "飞书"}。"""
+{9 if language=='en' else 7}. 汇报：今日推送第 X/N 张、主题、{"术语核对要点、" if language=='en' else ""}已推送至{"IMA知识库" if push_method=='ima' else "飞书"}、进度已记录至 daily-progress.md。"""
     print(prompt)
 
 def main():
@@ -284,10 +402,13 @@ def main():
     gc = sub.add_parser('gen-cards'); gc.add_argument('slug')
     gi = sub.add_parser('gen-index'); gi.add_argument('slug')
     di = sub.add_parser('download-imgs'); di.add_argument('slug')
+    sm = sub.add_parser('summary'); sm.add_argument('slug')
+    lp = sub.add_parser('log-progress'); lp.add_argument('slug'); lp.add_argument('--card-id', required=True)
     pr = sub.add_parser('prompt'); pr.add_argument('slug')
     args = ap.parse_args()
     {'extract': cmd_extract, 'init': cmd_init, 'gen-cards': cmd_gen_cards,
-     'gen-index': cmd_gen_index, 'download-imgs': cmd_download_imgs, 'prompt': cmd_prompt
+     'gen-index': cmd_gen_index, 'download-imgs': cmd_download_imgs,
+     'summary': cmd_summary, 'log-progress': cmd_log_progress, 'prompt': cmd_prompt
     }.get(args.cmd, lambda a: ap.print_help())(args)
 
 if __name__ == '__main__':

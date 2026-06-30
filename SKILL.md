@@ -212,27 +212,88 @@ send_feishu.py 构造飞书 interactive 卡片 JSON，POST 到 webhook。
 
 ---
 
+## 推送模板系统
+
+每本书在 config.json 的 `template` 字段选择推送模板。首次配置时由 AI 引导用户选择。
+
+### 可用模板
+
+| 模板 ID | 名称 | 脚本 | 适用场景 | 设计规范 |
+|---------|------|------|----------|----------|
+| `pdf-standard` | PDF 标准卡片 | gen_card_pdf.py | 工具书、长文知识点 | A4，正文 18px/英文 15px，中英对照，多字小字 |
+| `pdf-large` | PDF 大字卡片 | gen_card_pdf_large.py | 单词、术语、短知识点 | A4，标题 42px，正文≥18px，超大字号，适合远距离/打印 |
+| `feishu-card` | 飞书交互卡片 | send_feishu.py | 即时学习提醒 | 飞书 interactive 卡片，markdown 排版，图床上传 |
+| `feishu-card+image` | 飞书卡片+图片补充 | send_feishu.py + gen_image.py | 知识点可视化 | 飞书卡片 + 附带 1:1 或 1:4 图片 |
+
+### 设计风格规范
+
+**配色**（所有模板统一）：绿(#1a7f37) 核心观点 / 蓝(#0969da) 解释 / 紫(#8250df) 金句 / 橙(#bf8700) 应用 / 红(#cf222e) 术语
+
+**字体栈**（跨平台）：微软雅黑 → 苹方 → 冬青黑 → Noto CJK → 思源黑体 → 文泉驿 → 宋体
+
+**超链接**：所有模板中 URL 均以纯文字显示（IMA 不能点击），格式为「标题 + 换行 + 完整 URL」
+
+**图片模板设计**（gen_image.py）：
+- 1:1 正方形（750×750px）：精简内容，适合飞书卡片内嵌
+- 1:4 长图（750×3000px）：完整知识点，适合长文滚动阅读
+- 只作为飞书卡片补充，**不能单独以图片形式推送**
+- 生成方式：HTML → weasyprint PDF → pdf2image PNG（依赖 pdf2image + poppler）
+- 设计参考：[react-paper-memo](https://github.com/JustinChia/react-paper-memo) 大字号可打印卡片理念
+
+### 模板选择建议
+
+- **英文工具书/专业书** → `pdf-standard`（中英对照，多字详解）
+- **英语单词/术语学习** → `pdf-large`（大字号，一眼看清）
+- **日常学习提醒** → `feishu-card`（即时推送到手机）
+- **知识点可视化** → `feishu-card+image`（卡片+配图长图）
+
+---
+
+## 配置确认与进度文件
+
+### 配置确认（summary 命令）
+
+每本书设置完成后，运行 `python3 book_setup.py summary <slug>` 输出详细配置汇报，包括：书名、语言、拆解粒度、卡片转化情况（总数/配图/链接/术语）、推送模板、推送通道、IMA目标/飞书webhook、失败通知webhook、文件清单、测试推送设置。用户确认后再生成定时任务提示词。
+
+### daily-progress.md
+
+每本书的 `books/<slug>/daily-progress.md` 记录学习进度。每次推送成功后追加一行（不替换已有记录）：
+
+```markdown
+| 日期 | 序号 | 卡片ID | 主题 | 推送方式 | 状态 |
+|------|------|--------|------|----------|------|
+| 2026-06-30 | 1/118 | ch01-01 | 西方音乐记谱法导论 | ima | ✅ 成功 |
+```
+
+定时任务提示词中已包含 `log-progress` 步骤，推送成功后自动追加记录。
+
+---
+
 ## 文件说明
 
 | 文件 | 作用 |
 |------|------|
 | `SKILL.md` | 本指令 |
 | `extract_text.py` | 多格式文本提取（PDF/DOCX/HTML/EPUB/TXT/RTF，带回退链） |
-| `book_setup.py` | 拆书编排（extract/init/gen-cards/gen-index/download-imgs/prompt） |
+| `book_setup.py` | 拆书编排（extract/init/gen-cards/gen-index/download-imgs/summary/log-progress/prompt） |
 | `push_card.py` | 推送进度管理（status/next/mark/weekday/list-books，--book 参数化） |
-| `gen_card_pdf.py` | 卡片式 PDF 生成（中英文自适应，超链接文字化） |
-| `upload_ima.py` | IMA 知识库上传（参数化 kb/folder，密钥失效检测） |
+| `gen_card_pdf.py` | PDF 标准卡片生成（中英文自适应，超链接文字化） |
+| `gen_card_pdf_large.py` | PDF 大字卡片生成（A4，正文≥18px，标题42px） |
+| `gen_image.py` | 补充图片生成（1:1/1:4，HTML→PDF→PNG） |
+| `upload_ima.py` | IMA 知识库上传（动态查找 ima-skill，密钥失效检测） |
 | `send_feishu.py` | 飞书卡片推送（图床上传，中英文自适应） |
 | `notify_failure.py` | 通用失败通知（参数化 webhook） |
-| `books/<slug>/` | 每本书独立数据（config/items/index/progress/cards/images/full_text） |
+| `books/<slug>/` | 每本书独立数据（config/items/index/progress/daily-progress/cards/images/full_text） |
 
 ## 辅助命令
 
 - 查看所有书：`cd $SD && python3 push_card.py list-books`
 - 查看进度：`python3 push_card.py status --book <slug>`
+- 配置确认：`python3 book_setup.py summary <slug>`
 - 手动重推：`python3 push_card.py next --book <slug> --force`
 - 重置进度：编辑 `books/<slug>/progress.json`，置 null 清空 history
-- 输出定时提示词：`python3 book_setup.py prompt --slug <slug>`
+- 输出定时提示词：`python3 book_setup.py prompt <slug>`
+- 记录进度到 md：`python3 book_setup.py log-progress <slug> --card-id <id>`
 
 ## 注意事项
 
