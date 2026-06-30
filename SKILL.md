@@ -3,30 +3,25 @@ name: book-to-learn
 description: |
   把任意一本书分解成日常学习任务，每日推送一张知识点卡片。
   支持中英文书籍（PDF/DOCX/HTML/EPUB/TXT），拆解为知识点后每日推送。
-  当用户提到"拆书学习"、"book to learn"、"每日读书卡片"、"把书分解成学习任务"、
-  "推送读书卡片"，或要对一本书建立每日学习推送时，使用此 skill。
   英文书自动联网核对术语并实时翻译；中文书无翻译环节。
-  默认推送 IMA 知识库（PDF 形式），备选飞书卡片消息。
-  首次使用需配置 IMA 凭证/推送目标/通知 webhook。
-homepage: https://github.com/virgiliojr94/book-to-skill
+  四种推送模板：PDF标准卡片、PDF大字闪卡、飞书交互卡片、飞书卡片+图片补充。
+  提示词与数据分离，可自由变体为单词学习、诗词海报、新闻讲解等任务。
+version: 1.0.0
+homepage: https://github.com/sedey999/book-to-learn
 metadata:
   openclaw:
     emoji: 📖
     requires:
-      env:
-        - IMA_OPENAPI_CLIENTID
-        - IMA_OPENAPI_APIKEY
+      anyBins:
+        - python3
+    envVars:
+      - name: IMA_OPENAPI_CLIENTID
+        required: false
+        description: IMA OpenAPI Client ID (only needed for IMA push method)
+      - name: IMA_OPENAPI_APIKEY
+        required: false
+        description: IMA OpenAPI API Key (only needed for IMA push method)
     primaryEnv: IMA_OPENAPI_CLIENTID
-  security:
-    credentials_usage: |
-      本 skill 调用 IMA OpenAPI 上传 PDF，或调用飞书 webhook 发送卡片。
-      IMA 凭证存储于 ~/.config/ima/，仅发送给 ima.qq.com。
-      飞书 webhook URL 存储于 config.json，仅发送给 open.feishu.cn。
-      失败通知发送给 config.json 的 notifyWebhook。
-    allowed_domains:
-      - ima.qq.com
-      - '*.myqcloud.com'
-      - open.feishu.cn
 ---
 
 # book-to-learn — 把书分解成日常学习任务
