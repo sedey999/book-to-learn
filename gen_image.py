@@ -9,6 +9,7 @@ Design: BIG fonts, MINIMAL content. Like a physical flashcard.
   - Terms: large (22-26px)
   - NO core idea, NO explanation, NO links — just the essentials
   - Width fixed at 750px; height auto-adapts to content (no fixed aspect ratio)
+  - Card-style design with borders, section dividers, tag/badge elements
 
 Usage:
   python gen_image.py --payload <payload.json> [--zh <zh.json>] --out <output.png> [--format <1:1|1:4|auto>] [--language <zh|en>]
@@ -49,10 +50,8 @@ def build_html(payload, zh, date_str, language='en', fmt='auto'):
     main_title = esc(topic_zh) if (bilingual and topic_zh) else topic
     en_subtitle = topic if (bilingual and topic_zh) else ''
 
-    # Fixed width; use a large height so content fits, then crop whitespace
     page_w = '750px'
 
-    # auto: content determines height — use a generous page, crop later
     if fmt == '1:1':
         page_h = '750px'
         padding = '24px'
@@ -67,17 +66,34 @@ def build_html(payload, zh, date_str, language='en', fmt='auto'):
 
     sections = []
 
-    # Terms (minimal, large)
+    # Terms section with card-style design
     terms_zh = (zh or {}).get('terminologyZh', {})
     if bilingual and terms_zh:
-        rows = ''.join('<div class="term-row"><span class="term-en">%s</span> <span class="term-arrow">→</span> <span class="term-cn">%s</span></div>'
-                       % (esc(en), esc(cn)) for en, cn in list(terms_zh.items())[:5])
-        sections.append('<div class="sec"><div class="sec-h term-h">术语</div>%s</div>' % rows)
+        term_items = ''
+        for en, cn in list(terms_zh.items())[:5]:
+            term_items += f'''<div class="term-card">
+                <span class="term-en">{esc(en)}</span>
+                <span class="term-arrow">→</span>
+                <span class="term-cn">{esc(cn)}</span>
+            </div>'''
+        sections.append(f'''<div class="section">
+            <div class="section-header">
+                <span class="section-tag tag-red">术语</span>
+                <div class="section-line"></div>
+            </div>
+            <div class="term-list">{term_items}</div>
+        </div>''')
 
-    # Quote only (NO core idea, NO explanation)
+    # Quote section with card-style design
     quote_zh = (zh or {}).get('quoteZh', '') if bilingual else payload.get('quote', '')
     if quote_zh:
-        sections.append('<div class="sec"><div class="quote-box">%s</div></div>' % esc(quote_zh))
+        sections.append(f'''<div class="section">
+            <div class="section-header">
+                <span class="section-tag tag-purple">金句</span>
+                <div class="section-line"></div>
+            </div>
+            <div class="quote-card">{esc(quote_zh)}</div>
+        </div>''')
 
     # image
     img_html = ''
@@ -86,45 +102,187 @@ def build_html(payload, zh, date_str, language='en', fmt='auto'):
 
     body = ''.join(sections)
 
-    # font sizes scale up for 1:4
-    quote_fs = '32px' if fmt == '1:4' else '26px'
-    term_fs = '26px' if fmt == '1:4' else '22px'
-    sec_h_fs = '28px' if fmt == '1:4' else '22px'
+    # font sizes
+    quote_fs = '32px' if fmt == '1:4' else '28px'
+    term_fs = '26px' if fmt == '1:4' else '24px'
+    sec_tag_fs = '20px' if fmt == '1:4' else '18px'
 
     html_str = f'''<!DOCTYPE html><html lang="zh"><head><meta charset="UTF-8">
 <style>
 @page {{ size: {page_w} {page_h}; margin: 0; }}
 * {{ box-sizing: border-box; margin: 0; padding: 0; }}
-body {{ font-family: "Microsoft YaHei", "微软雅黑", "PingFang SC", "Hiragino Sans GB", "Noto Sans CJK SC", "SimSun", "宋体", sans-serif; color: #1f2328; width: {page_w}; }}
-.card {{ background: #fff; display: flex; flex-direction: column; }}
-.card-head {{ background: linear-gradient(135deg, #1cb0f6, #0969da); color: #fff; padding: {padding}; text-align: center; }}
-.card-head .topic {{ font-size: {title_size}px; font-weight: 900; line-height: 1.2; word-break: keep-all; }}
-.card-head .topic-en {{ font-size: 20px; font-weight: 500; margin-top: 8px; opacity: .8; font-style: italic; }}
-.card-head .progress {{ font-size: 18px; opacity: .85; margin-bottom: 12px; }}
-.card-body {{ flex: 1; display: flex; flex-direction: column; justify-content: center; padding: {padding}; }}
-.sec {{ margin-bottom: 24px; }}
-.sec-h {{ font-size: {sec_h_fs}; font-weight: 800; margin-bottom: 12px; }}
-.term-h {{ color: #cf222e; }}
-.term-row {{ font-size: {term_fs}; margin-bottom: 10px; line-height: 1.5; }}
-.term-en {{ color: #8a5a00; font-weight: 700; }}
-.term-arrow {{ color: #999; margin: 0 8px; }}
-.term-cn {{ color: #1f2328; }}
-.quote-box {{ font-size: {quote_fs}; font-style: italic; color: #5b3b8c; line-height: 1.5; text-align: center; padding: 16px 0; }}
-.img-wrap {{ text-align: center; margin-bottom: 20px; }}
-.img-wrap img {{ max-width: 85%; border-radius: 12px; border: 1px solid #eee; }}
-.footer {{ padding: 16px {padding}; font-size: 16px; color: #8c959f; text-align: center; border-top: 1px solid #eee; }}
+body {{
+    font-family: "Microsoft YaHei", "微软雅黑", "PingFang SC", "Hiragino Sans GB",
+                 "Noto Sans CJK SC", "SimSun", "宋体", sans-serif;
+    color: #1f2328;
+    width: {page_w};
+    background: #eef2f7;
+}}
+/* Outer card frame */
+.card {{
+    background: #fff;
+    margin: 0;
+    display: flex;
+    flex-direction: column;
+    border-left: 6px solid #0969da;
+    border-right: 1px solid #e1e4e8;
+    border-bottom: 1px solid #e1e4e8;
+    min-height: 400px;
+}}
+/* Header — gradient blue with progress bar */
+.card-head {{
+    background: linear-gradient(135deg, #1cb0f6, #0969da);
+    color: #fff;
+    padding: {padding};
+    text-align: center;
+    position: relative;
+    border-bottom: 4px solid #1a7f37;
+}}
+.card-head .progress {{
+    font-size: 18px;
+    opacity: .85;
+    margin-bottom: 12px;
+    display: inline-block;
+    background: rgba(255,255,255,.18);
+    padding: 4px 16px;
+    border-radius: 99px;
+}}
+.card-head .topic {{
+    font-size: {title_size}px;
+    font-weight: 900;
+    line-height: 1.2;
+    word-break: keep-all;
+    text-shadow: 0 2px 4px rgba(0,0,0,.1);
+}}
+.card-head .topic-en {{
+    font-size: 20px;
+    font-weight: 500;
+    margin-top: 8px;
+    opacity: .8;
+    font-style: italic;
+}}
+.card-head .chapter-badge {{
+    display: inline-block;
+    font-size: 14px;
+    background: rgba(255,255,255,.25);
+    padding: 3px 14px;
+    border-radius: 99px;
+    margin-top: 12px;
+    font-weight: 600;
+}}
+/* Card body */
+.card-body {{
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    padding: {padding};
+    gap: 20px;
+}}
+/* Section with tag header */
+.section {{
+    margin-bottom: 8px;
+}}
+.section-header {{
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 14px;
+}}
+.section-tag {{
+    font-size: {sec_tag_fs};
+    font-weight: 800;
+    padding: 4px 14px;
+    border-radius: 6px;
+    color: #fff;
+    white-space: nowrap;
+    letter-spacing: 1px;
+}}
+.tag-red {{ background: #cf222e; }}
+.tag-purple {{ background: #8250df; }}
+.tag-green {{ background: #1a7f37; }}
+.tag-blue {{ background: #0969da; }}
+.tag-orange {{ background: #bf8700; }}
+.section-line {{
+    flex: 1;
+    height: 2px;
+    background: linear-gradient(90deg, #e1e4e8, transparent);
+}}
+/* Term cards — individual bordered cards */
+.term-list {{
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}}
+.term-card {{
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-size: {term_fs};
+    padding: 10px 16px;
+    background: #fff7e0;
+    border: 1px solid #ffe08a;
+    border-left: 4px solid #bf8700;
+    border-radius: 8px;
+    line-height: 1.5;
+}}
+.term-en {{
+    color: #8a5a00;
+    font-weight: 700;
+}}
+.term-arrow {{
+    color: #999;
+    flex-shrink: 0;
+}}
+.term-cn {{
+    color: #1f2328;
+    font-weight: 500;
+}}
+/* Quote card — purple tinted with left border */
+.quote-card {{
+    font-size: {quote_fs};
+    font-style: italic;
+    color: #5b3b8c;
+    line-height: 1.6;
+    text-align: center;
+    padding: 20px 24px;
+    background: #f6f0fb;
+    border: 1px solid #d8c8ed;
+    border-left: 4px solid #8250df;
+    border-radius: 8px;
+}}
+/* Image */
+.img-wrap {{
+    text-align: center;
+    margin-bottom: 8px;
+}}
+.img-wrap img {{
+    max-width: 85%;
+    border-radius: 12px;
+    border: 2px solid #e1e4e8;
+}}
+/* Footer with top border */
+.footer {{
+    padding: 14px {padding};
+    font-size: 14px;
+    color: #8c959f;
+    text-align: center;
+    border-top: 1px solid #e1e4e8;
+    background: #f9fafb;
+}}
 </style></head><body>
 <div class="card">
-  <div class="card-head">
-    <div class="progress">第 {idx} / {total} 张</div>
-    <div class="topic">{main_title}</div>
-    {('<div class="topic-en">' + en_subtitle + '</div>') if en_subtitle else ''}
-  </div>
-  <div class="card-body">
-    {img_html}
-    {body}
-  </div>
-  <div class="footer">{esc(date_str)}</div>
+    <div class="card-head">
+        <div class="progress">第 {idx} / {total} 张</div>
+        <div class="topic">{main_title}</div>
+        {('<div class="topic-en">' + en_subtitle + '</div>') if en_subtitle else ''}
+        {('<span class="chapter-badge">' + chapter + '</span>') if chapter else ''}
+    </div>
+    <div class="card-body">
+        {img_html}
+        {body}
+    </div>
+    <div class="footer">{esc(date_str)}</div>
 </div>
 </body></html>'''
     return html_str
@@ -132,20 +290,18 @@ body {{ font-family: "Microsoft YaHei", "微软雅黑", "PingFang SC", "Hiragino
 
 def crop_whitespace(img_path, out_path=None):
     """Crop trailing whitespace from bottom of image for auto-height mode.
-    Uses a tolerance threshold so near-white colors (#eef2f7 etc.) are treated as background."""
+    Uses a tolerance threshold so near-white colors are treated as background."""
     from PIL import Image
     import numpy as np
     if out_path is None:
         out_path = img_path
     img = Image.open(img_path).convert('RGB')
     arr = np.array(img)
-    # A pixel is "background" if all channels > 235 (covers #eef2f7 = 238,242,247)
+    # Background is #eef2f7 = (238,242,247). Threshold at 235.
     is_content = (arr[:, :, 0] < 235) | (arr[:, :, 1] < 235) | (arr[:, :, 2] < 235)
-    # Find rows that have any content
     rows_with_content = np.any(is_content, axis=1)
     if rows_with_content.any():
         last_content_row = np.where(rows_with_content)[0][-1]
-        # Add 20px padding at bottom
         bottom = min(last_content_row + 21, img.height)
         cropped = img.crop((0, 0, img.width, bottom))
         cropped.save(out_path, 'PNG')
@@ -161,7 +317,6 @@ def verify_image(img_path):
         w, h = img.size
         if w < 10 or h < 10:
             return {'ok': False, 'error': f'Image too small: {w}x{h}'}
-        # Sample pixels to check it's not blank
         pixels = list(img.convert('RGB').getdata())
         unique_colors = set(pixels[:1000])
         if len(unique_colors) <= 1:
@@ -183,7 +338,7 @@ def main():
     payload = json.load(open(args.payload, encoding='utf-8'))
     zh = json.load(open(args.zh, encoding='utf-8')) if args.zh else None
     language = args.language or payload.get('language', 'en')
-    zh, payload = normalize_all(zh, payload, language)  # 规范化中文引号
+    zh, payload = normalize_all(zh, payload, language)
     date_str = datetime.date.today().isoformat()
 
     html_str = build_html(payload, zh, date_str, language=language, fmt=args.format)
@@ -194,7 +349,6 @@ def main():
         from pdf2image import convert_from_path
         images = convert_from_path(tmp_pdf, dpi=150)
         if images:
-            # If multiple pages, concatenate vertically
             if len(images) > 1:
                 from PIL import Image as PILImage
                 total_h = sum(img.height for img in images)
@@ -208,18 +362,16 @@ def main():
             else:
                 images[0].save(args.out, 'PNG')
 
-            # For auto mode: crop trailing whitespace
             if args.format == 'auto':
                 w, h = crop_whitespace(args.out)
 
-            # Auto-verify
             verification = verify_image(args.out)
             result = {'ok': True, 'image': args.out, 'format': args.format,
                       'size': os.path.getsize(args.out), 'date': date_str,
                       'pages': len(images), 'verification': verification}
             print(json.dumps(result, ensure_ascii=False))
             if not verification.get('ok'):
-                sys.exit(2)  # exit code 2 = image generated but verification failed
+                sys.exit(2)
         else:
             print(json.dumps({'ok': False, 'error': 'pdf2image returned no images'}, ensure_ascii=False))
             sys.exit(1)
