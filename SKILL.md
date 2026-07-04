@@ -6,7 +6,7 @@ description: |
   英文书自动联网核对术语并实时翻译；中文书无翻译环节。
   四种推送模板：PDF标准卡片、PDF大字闪卡、飞书交互卡片、飞书卡片+图片补充。
   提示词与数据分离，可自由变体为单词学习、诗词海报、新闻讲解等任务。
-version: 1.2.0
+version: 1.3.0
 homepage: https://github.com/sedey999/book-to-learn
 metadata:
   openclaw:
@@ -84,14 +84,16 @@ cd $SD && python3 book_setup.py init <book-slug> --title "书名" --lang <zh|en>
 ```
 生成 `books/<slug>/config.json` 骨架。然后**与用户确认并填写**以下空字段：
 - `language`：zh（中文书，无翻译）/ en（英文书，需翻译）
-- `pushMethod`：ima（默认）/ feishu（备选）
+- `pushMethod`：ima（默认）/ feishu（webhook）/ feishu-api（飞书 Open API，支持图片/文件直发）
 - `ima.kbName` / `ima.folderName`：IMA 知识库名称和文件夹（用 `list-kb` 命令列出知识库让用户选）
 - `feishu.webhook`：飞书 webhook（若选 feishu）
+- `feishuApi.appId` / `feishuApi.appSecret` / `feishuApi.chatId`：飞书 Open API 凭证和目标会话（若选 feishu-api）
 - `notifyWebhook`：失败通知 webhook（**必填**，任何失败都发此通知）
 
-**确认推送方案**：向用户说明两种方案并让其选择：
+**确认推送方案**：向用户说明三种方案并让其选择：
 - **IMA PDF（默认）**：上传卡片式 PDF 到 IMA 知识库文件夹。优势：可检索、配图内嵌、离线可读。适合知识库积累。
-- **飞书卡片（备选）**：发送交互式卡片消息到飞书 webhook。优势：即时通知、交互式。限制：图片需上传图床（catbox.moe）获取 URL。适合即时学习提醒。
+- **飞书 webhook（备选）**：发送交互式卡片消息到飞书 webhook。优势：即时通知、交互式。限制：图片需上传图床（catbox.moe）获取 URL。适合即时学习提醒。
+- **飞书 Open API（推荐多媒体）**：通过 App ID + App Secret 直接发送到指定飞书会话。优势：支持原生图片/文件发送（无需图床）、可发个人/群聊。需在飞书开放平台创建自建应用。适合需要发送图片卡片的场景。
 
 ### Step 3：AI 分析结构并生成大纲
 读取 `books/<slug>/full_text.txt`（大书用 offset/limit 分段读，先读前 8000 字符识别标题/作者/章节/目录）。
@@ -169,7 +171,9 @@ cd $SD && python3 book_setup.py prompt --slug <book-slug>
 6. **推送**（按 config.pushMethod）：
    - IMA：`python3 upload_ima.py --file "<pdf>" --config books/<slug>/config.json --book-dir books/<slug>`
      退出码 0=成功；2=密钥失效（已发通知）不计进度结束；1=其他错误不更新进度结束。
-   - 飞书：`python3 send_feishu.py --payload /tmp/b2l_payload.json --zh /tmp/b2l_zh.json --config books/<slug>/config.json --language en`
+   - 飞书 webhook：`python3 send_feishu.py --payload /tmp/b2l_payload.json --zh /tmp/b2l_zh.json --config books/<slug>/config.json --language en`
+   - 飞书 API：`python3 send_feishu_api.py --payload /tmp/b2l_payload.json --zh /tmp/b2l_zh.json --config books/<slug>/config.json --language en`
+     （如需同时发送图片卡片，追加：`python3 send_feishu_api.py --image <gen_image输出.png> --config books/<slug>/config.json`）
 
 7. **记录进度**（仅成功后）：`python3 push_card.py mark --book <slug> <nextId> success`
 
@@ -190,9 +194,11 @@ cd $SD && python3 book_setup.py prompt --slug <book-slug>
 
 ---
 
-## 飞书卡片方案实现说明（备选）
+## 飞书推送方案说明
 
-send_feishu.py 构造飞书 interactive 卡片 JSON，POST 到 webhook。
+### 方案一：Webhook（send_feishu.py）
+
+构造飞书 interactive 卡片 JSON，POST 到 webhook URL。
 
 **卡片结构**：
 - header：蓝色标题「书名 · 主题」（禁止使用 emoji，系统不兼容）
@@ -204,6 +210,39 @@ send_feishu.py 构造飞书 interactive 卡片 JSON，POST 到 webhook。
 3. 上传失败 → 文字提示「配图见来源链接」
 
 **链接处理**：飞书卡片 markdown 支持可点击链接，但为兼容性仍附纯文字 URL。
+
+### 方案二：Open API（send_feishu_api.py）
+
+通过飞书开放平台 App ID + App Secret 直接发送消息到指定会话，支持原生图片和文件。
+
+**配置**（config.json 中）：
+```json
+{
+  "pushMethod": "feishu-api",
+  "feishuApi": {
+    "appId": "cli_xxxxx",
+    "appSecret": "xxxxx",
+    "chatId": "oc_xxxxx"
+  }
+}
+```
+
+也可通过环境变量配置：`FEISHU_APP_ID`、`FEISHU_APP_SECRET`、`FEISHU_CHAT_ID`。
+
+**创建飞书自建应用**：
+1. 访问 https://open.feishu.cn/app 创建企业自建应用
+2. 获取 App ID 和 App Secret
+3. 开通权限：`im:message`（发消息）、`im:message:send_as_bot`（以机器人身份发消息）、`im:resource`（上传图片/文件）
+4. 将机器人添加到目标群聊，获取 chat_id（可通过 `GET /im/v1/chats` API 获取）
+
+**发送模式**：
+- 交互式卡片：`--payload <payload.json> [--zh <zh.json>]`（与 webhook 方式卡片结构相同）
+- 独立图片：`--image <path.png>`（直接上传 PNG 到飞书，生成 image_key 后发送）
+- 独立文件：`--file <path.pdf>`（上传 PDF 等文件到飞书，生成 file_key 后发送）
+
+**图片处理**：通过 Open API 原生上传，无需第三方图床。base64 data URI 会先写入临时文件再上传。
+
+**优势**：支持多媒体内容直发、不依赖第三方图床、可发个人/群聊。
 
 ---
 
@@ -276,7 +315,8 @@ send_feishu.py 构造飞书 interactive 卡片 JSON，POST 到 webhook。
 | `gen_card_pdf_large.py` | PDF 大字卡片生成（A4，正文≥18px，标题42px） |
 | `gen_image.py` | 补充图片生成（1:1/1:4，HTML→PDF→PNG） |
 | `upload_ima.py` | IMA 知识库上传（动态查找 ima-skill，密钥失效检测） |
-| `send_feishu.py` | 飞书卡片推送（图床上传，中英文自适应） |
+| `send_feishu.py` | 飞书 webhook 卡片推送（图床上传，中英文自适应） |
+| `send_feishu_api.py` | 飞书 Open API 推送（支持原生图片/文件直发，无需图床） |
 | `notify_failure.py` | 通用失败通知（参数化 webhook） |
 | `books/<slug>/` | 每本书独立数据（config/items/index/progress/daily-progress/cards/images/full_text） |
 

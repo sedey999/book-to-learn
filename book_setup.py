@@ -60,6 +60,7 @@ def cmd_init(args):
         'pushMethod': 'ima',
         'ima': {'kbName': '', 'folderName': ''},
         'feishu': {'webhook': ''},
+        'feishuApi': {'appId': '', 'appSecret': '', 'chatId': ''},
         'notifyWebhook': '',
         'granularity': args.granularity,
         'cardPrefix': args.prefix or 'BOOK',
@@ -286,12 +287,18 @@ def cmd_summary(args):
     lines.append(f'')
     lines.append(f'【推送方式】')
     lines.append(f'  模板：{config.get("template", "pdf-standard")} → {template_names.get(config.get("template","pdf-standard"), "未知")}')
-    lines.append(f'  推送通道：{config.get("pushMethod", "ima")}')
-    if config.get('pushMethod') == 'ima':
+    push_method = config.get('pushMethod', 'ima')
+    lines.append(f'  推送通道：{push_method}')
+    if push_method == 'ima':
         lines.append(f'  IMA 知识库：{config.get("ima", {}).get("kbName", "[未设置]")}')
         lines.append(f'  目标文件夹：{config.get("ima", {}).get("folderName", "[未设置]")}')
-    else:
+    elif push_method == 'feishu':
         lines.append(f'  飞书 Webhook：{config.get("feishu", {}).get("webhook", "[未设置]")[:50]}...')
+    elif push_method == 'feishu-api':
+        fa = config.get('feishuApi', {})
+        lines.append(f'  飞书 App ID：{fa.get("appId", "[未设置]")[:20]}...')
+        lines.append(f'  飞书 App Secret：{"[已设置]" if fa.get("appSecret") else "[未设置]"}')
+        lines.append(f'  飞书 Chat ID：{fa.get("chatId", "[未设置]")}')
     if config.get("imageFormat"):
         lines.append(f'  图片格式：{config.get("imageFormat")}')
     lines.append(f'  测试推送：{"是" if config.get("testPush") else "否"}')
