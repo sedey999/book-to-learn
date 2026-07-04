@@ -83,12 +83,12 @@ def build_html(payload, zh, date_str, language='en'):
     core_zh = (zh or {}).get('coreIdeaZh', '') if bilingual else payload.get('coreIdea', '')
     if core_zh:
         core_ps = ''.join('<p>%s</p>' % p for p in paras(core_zh))
-        sections.append('<div class="sec"><div class="sec-h" style="color:#1a7f37">核心观点</div><div class="core">%s</div></div>' % core_ps)
+        sections.append('<div class="sec"><div class="sec-h" style="color:#1e8e3e">核心观点</div><div class="core">%s</div></div>' % core_ps)
 
     # Quote (Chinese only)
     quote_zh = (zh or {}).get('quoteZh', '') if bilingual else payload.get('quote', '')
     if quote_zh:
-        sections.append('<div class="sec"><div class="sec-h" style="color:#8250df">金句</div><div class="quote">%s</div></div>' % esc(quote_zh))
+        sections.append('<div class="sec"><div class="sec-h" style="color:#7b1fa2">金句</div><div class="quote">%s</div></div>' % esc(quote_zh))
 
     # image (if any)
     img_html = ''
@@ -103,7 +103,7 @@ def build_html(payload, zh, date_str, language='en'):
 * {{ box-sizing: border-box; margin: 0; padding: 0; }}
 body {{ font-family: "Microsoft YaHei", "微软雅黑", "PingFang SC", "Hiragino Sans GB", "Heiti SC", "Noto Sans CJK SC", "Source Han Sans SC", "WenQuanYi Micro Hei", "SimSun", "宋体", sans-serif; color: #1f2328; line-height: 1.6; }}
 .card {{ border: 4px solid #e1e4e8; border-radius: 24px; overflow: hidden; min-height: 230mm; display: flex; flex-direction: column; }}
-.card-head {{ background: linear-gradient(135deg,#1cb0f6,#0969da); color: #fff; padding: 28px 32px; text-align: center; }}
+.card-head {{ background: linear-gradient(135deg,#1a73e8,#1557b0); color: #fff; padding: 28px 32px; text-align: center; }}
 .card-head .progress {{ font-size: 22px; font-weight: 700; opacity: .9; margin-bottom: 16px; }}
 .card-head .topic {{ font-size: {title_size}px; font-weight: 900; line-height: 1.2; word-break: keep-all; overflow-wrap: break-word; }}
 .card-head .topic-en {{ font-size: 24px; font-weight: 500; margin-top: 10px; opacity: .8; font-style: italic; }}
@@ -112,7 +112,7 @@ body {{ font-family: "Microsoft YaHei", "微软雅黑", "PingFang SC", "Hiragino
 .sec {{ padding: 24px 32px; border-bottom: 3px solid #f0f1f3; }}
 .sec:last-child {{ border-bottom: none; }}
 .sec-h {{ font-size: 24px; font-weight: 800; margin-bottom: 16px; letter-spacing: .5px; }}
-.term-h {{ color: #cf222e; }}
+.term-h {{ color: #d93025; }}
 .term-tbl {{ width: 100%; border-collapse: collapse; }}
 .term-tbl td {{ padding: 12px 16px; border-bottom: 2px solid #f0f1f3; font-size: 24px; }}
 .term-en {{ color: #8a5a00; font-weight: 700; white-space: nowrap; }}

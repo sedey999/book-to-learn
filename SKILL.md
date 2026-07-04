@@ -6,11 +6,11 @@ description: |
   英文书自动联网核对术语并实时翻译；中文书无翻译环节。
   四种推送模板：PDF标准卡片、PDF大字闪卡、飞书交互卡片、飞书卡片+图片补充。
   提示词与数据分离，可自由变体为单词学习、诗词海报、新闻讲解等任务。
-version: 1.1.0
+version: 1.2.0
 homepage: https://github.com/sedey999/book-to-learn
 metadata:
   openclaw:
-    emoji: 📖
+    emoji: 📖  # ClawHub metadata, not rendered in PDF/image
     requires:
       anyBins:
         - python3
@@ -195,7 +195,7 @@ cd $SD && python3 book_setup.py prompt --slug <book-slug>
 send_feishu.py 构造飞书 interactive 卡片 JSON，POST 到 webhook。
 
 **卡片结构**：
-- header：蓝色标题「📚 书名 · 主题」
+- header：蓝色标题「书名 · 主题」（禁止使用 emoji，系统不兼容）
 - elements：进度+章节 → 术语表(markdown表格) → 内容分栏(中英对照/纯中文) → 配图 → 相关链接 → 来源(note)
 
 **图片处理**（飞书卡片图片需 URL 或 image_key）：
@@ -222,7 +222,7 @@ send_feishu.py 构造飞书 interactive 卡片 JSON，POST 到 webhook。
 
 ### 设计风格规范
 
-**配色**（所有模板统一）：绿(#1a7f37) 核心观点 / 蓝(#0969da) 解释 / 紫(#8250df) 金句 / 橙(#bf8700) 应用 / 红(#cf222e) 术语
+**配色**（Google Material Design 色系，所有模板统一）：绿(#1e8e3e) 核心观点 / 蓝(#1a73e8) 解释、标题栏 / 紫(#7b1fa2) 金句 / 橙(#f9ab00) 应用、术语 / 红(#d93025) 术语标签、错误状态
 
 **字体栈**（跨平台）：微软雅黑 → 苹方 → 冬青黑 → Noto CJK → 思源黑体 → 文泉驿 → 宋体
 
@@ -257,7 +257,7 @@ send_feishu.py 构造飞书 interactive 卡片 JSON，POST 到 webhook。
 ```markdown
 | 日期 | 序号 | 卡片ID | 主题 | 推送方式 | 状态 |
 |------|------|--------|------|----------|------|
-| 2026-06-30 | 1/118 | ch01-01 | 西方音乐记谱法导论 | ima | ✅ 成功 |
+| 2026-06-30 | 1/118 | ch01-01 | 西方音乐记谱法导论 | ima | 成功 |
 ```
 
 定时任务提示词中已包含 `log-progress` 步骤，推送成功后自动追加记录。
@@ -296,5 +296,7 @@ send_feishu.py 构造飞书 interactive 卡片 JSON，POST 到 webhook。
 - 失败绝不计进度，确保下次重推同一张
 - PDF 文件名日期格式统一 `YYYY-MM-DD`
 - 英文书翻译质量优先：术语必须联网核对
+- **禁止 emoji**：HTML→PDF→图片流程中禁止使用任何 emoji 或特殊符号（weasyprint 无法渲染）。所有脚本中的 emoji 已替换为纯文字标记（如 `[OK]`、`[警告]`、`[未设置]`）。
 - **中文引号规范**：所有脚本内置 `normalize_quotes.py`，自动将英文直引号 `""` 转换为中文双引号 `""`（U+201C/U+201D）。即使 AI 翻译输出的 JSON 含英文引号，PDF 和飞书卡片最终输出也会被自动修正。中文书的 `items.json` 中若含英文引号，同样会被自动修正。
+- **图片生成后自动验证**：`gen_image.py` 生成 PNG 后会自动检查图片尺寸和内容是否正常，验证失败时退出码为 2。
 - 假设不同用户使用：所有配置在 config.json，不硬编码

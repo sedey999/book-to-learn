@@ -251,4 +251,4 @@ if __name__ == '__main__':
     assert '\u201c哈希函数\u201d' in zh_out['coreIdeaZh'], f'Smart mode should convert Chinese quotes: {zh_out["coreIdeaZh"]!r}'
     assert payload_out['coreIdea'] == 'A "key-value" store', f'English payload should NOT be touched: {payload_out["coreIdea"]!r}'
 
-    print('✅ 所有自测通过')
+    print('[OK] 所有自测通过')

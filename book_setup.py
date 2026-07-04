@@ -266,7 +266,7 @@ def cmd_summary(args):
 
     lines = []
     lines.append(f'═══════════════════════════════════════════════════')
-    lines.append(f'  📖 《{config.get("bookTitle", args.slug)}》 配置确认')
+    lines.append(f'  《{config.get("bookTitle", args.slug)}》 配置确认')
     lines.append(f'═══════════════════════════════════════════════════')
     lines.append(f'')
     lines.append(f'【基本信息】')
@@ -288,30 +288,30 @@ def cmd_summary(args):
     lines.append(f'  模板：{config.get("template", "pdf-standard")} → {template_names.get(config.get("template","pdf-standard"), "未知")}')
     lines.append(f'  推送通道：{config.get("pushMethod", "ima")}')
     if config.get('pushMethod') == 'ima':
-        lines.append(f'  IMA 知识库：{config.get("ima", {}).get("kbName", "⚠️ 未设置")}')
-        lines.append(f'  目标文件夹：{config.get("ima", {}).get("folderName", "⚠️ 未设置")}')
+        lines.append(f'  IMA 知识库：{config.get("ima", {}).get("kbName", "[未设置]")}')
+        lines.append(f'  目标文件夹：{config.get("ima", {}).get("folderName", "[未设置]")}')
     else:
-        lines.append(f'  飞书 Webhook：{config.get("feishu", {}).get("webhook", "⚠️ 未设置")[:50]}...')
+        lines.append(f'  飞书 Webhook：{config.get("feishu", {}).get("webhook", "[未设置]")[:50]}...')
     if config.get("imageFormat"):
         lines.append(f'  图片格式：{config.get("imageFormat")}')
     lines.append(f'  测试推送：{"是" if config.get("testPush") else "否"}')
     lines.append(f'')
     lines.append(f'【失败通知】')
-    lines.append(f'  通知 Webhook：{config.get("notifyWebhook", "⚠️ 未设置")[:50]}{"..." if len(config.get("notifyWebhook",""))>50 else ""}')
+    lines.append(f'  通知 Webhook：{config.get("notifyWebhook", "[未设置]")[:50]}{"..." if len(config.get("notifyWebhook",""))>50 else ""}')
     lines.append(f'')
     lines.append(f'【文件清单】')
     for fn in ['config.json', 'items.json', 'index.json', 'progress.json', 'daily-progress.md']:
         p = os.path.join(bd, fn)
         if os.path.exists(p):
-            lines.append(f'  ✅ {fn} ({os.path.getsize(p)} bytes)')
+            lines.append(f'  [OK] {fn} ({os.path.getsize(p)} bytes)')
         else:
-            lines.append(f'  ❌ {fn} (未生成)')
+            lines.append(f'  [MISSING] {fn} (未生成)')
     cards_dir = os.path.join(bd, 'cards')
     if os.path.isdir(cards_dir):
-        lines.append(f'  ✅ cards/ ({len(os.listdir(cards_dir))} 张)')
+        lines.append(f'  [OK] cards/ ({len(os.listdir(cards_dir))} 张)')
     img_dir = os.path.join(bd, 'images')
     if os.path.isdir(img_dir):
-        lines.append(f'  ✅ images/ ({len(os.listdir(img_dir))} 张)')
+        lines.append(f'  [OK] images/ ({len(os.listdir(img_dir))} 张)')
     lines.append(f'')
     lines.append(f'═══════════════════════════════════════════════════')
     lines.append(f'  请确认以上配置是否正确。如需调整，修改 {bd}/config.json')
@@ -338,7 +338,7 @@ def cmd_log_progress(args):
             break
     today = __import__('datetime').date.today().isoformat()
     push_method = config.get('pushMethod', 'ima')
-    row = f'| {today} | {card_index}/{index.get("totalCards","?")} | {card_id} | {topic} | {push_method} | ✅ 成功 |\n'
+    row = f'| {today} | {card_index}/{index.get("totalCards","?")} | {card_id} | {topic} | {push_method} | [OK] 成功 |\n'
     with open(dp_path, 'a', encoding='utf-8') as f:
         f.write(row)
     print(json.dumps({'ok': True, 'logged': card_id, 'date': today, 'file': dp_path}, ensure_ascii=False))

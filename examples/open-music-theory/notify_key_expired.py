@@ -11,7 +11,7 @@ WEBHOOK_URL = "https://open.feishu.cn/open-apis/bot/v2/hook/YOUR_WEBHOOK_TOKEN"
 def send(reason=""):
     now = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     text = (
-        "🔔 IMA 知识库 API 密钥失效通知\n"
+        "[通知] IMA 知识库 API 密钥失效通知\n"
         f"时间：{now}\n"
         "任务：Open Music Theory 每日双语卡片推送\n"
         f"原因：{reason or 'API 调用返回认证失败（密钥过期或无效）'}\n\n"
@@ -20,7 +20,7 @@ def send(reason=""):
         "2. 更新配置：\n"
         '   echo "<新Client ID>" > ~/.config/ima/client_id\n'
         '   printf \'%s\' "<新API Key>" > ~/.config/ima/api_key\n'
-        "\n⚠️ 本次卡片推送未完成，不计入进度，凭证更新后将自动重推同一张卡片。"
+        "\n[警告] 本次卡片推送未完成，不计入进度，凭证更新后将自动重推同一张卡片。"
     )
     body = json.dumps({
         "msg_type": "text",

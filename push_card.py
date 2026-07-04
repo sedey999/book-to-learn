@@ -80,7 +80,7 @@ def cmd_status(args):
     print('History entries:', len(progress.get('pushHistory', [])))
     nxt = get_next_index(progress, index)
     if nxt is None:
-        print('Status: ALL CARDS PUSHED ✓')
+        print('Status: ALL CARDS PUSHED [DONE]')
     else:
         print('Next card:', index['items'][nxt], '(#%d)' % (nxt + 1))
 

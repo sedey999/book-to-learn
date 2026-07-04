@@ -20,7 +20,7 @@ def load_config(path):
 def send(webhook_url, book_title, stage, reason):
     now = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     text = (
-        f"⚠️ Book-to-Learn 推送失败通知\n"
+        f"[警告] Book-to-Learn 推送失败通知\n"
         f"时间：{now}\n"
         f"书名：{book_title}\n"
         f"失败阶段：{stage}\n"

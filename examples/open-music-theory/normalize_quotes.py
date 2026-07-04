@@ -149,4 +149,4 @@ if __name__ == '__main__':
     normalize_terminology_zh(terms)
     assert terms['scalability'] == '可\u201c扩展\u201d性'
 
-    print('✅ 所有自测通过')
+    print('[OK] 所有自测通过')

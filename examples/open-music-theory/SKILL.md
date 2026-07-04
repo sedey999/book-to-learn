@@ -10,7 +10,7 @@ description: |
 homepage: https://viva.pressbooks.pub/openmusictheory
 metadata:
   openclaw:
-    emoji: 🎵
+    emoji: 🎵  # ClawHub metadata, not rendered in PDF/image
     requires:
       env:
         - IMA_OPENAPI_CLIENTID
@@ -124,10 +124,10 @@ cd $SD && python3 push_card.py next --force > /tmp/omt_payload.json
 ### Step 4：翻译质量全面检查
 
 在写入 JSON 前，逐项检查：
-- ✅ 中文部分是否全部使用中文引号「」，没有英文直引号 `" "`
-- ✅ 语义准确、流畅自然，没有生硬机翻
-- ✅ markdown 链接结构完整，段落一一对应
-- ✅ topicZh 翻译准确，将用于 PDF 文件名
+- [OK] 中文部分是否全部使用中文引号「」，没有英文直引号 `" "`
+- [OK] 语义准确、流畅自然，没有生硬机翻
+- [OK] markdown 链接结构完整，段落一一对应
+- [OK] topicZh 翻译准确，将用于 PDF 文件名
 - 发现问题立即修正
 
 ### Step 5：写翻译 JSON

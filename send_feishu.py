@@ -129,7 +129,7 @@ def build_card(payload, zh, language='en'):
             if url:
                 elements.append({"tag": "img", "url": url, "alt": {"tag": "plain_text", "content": "配图"}})
             else:
-                elements.append({"tag": "markdown", "content": "📷 配图（上传失败，见来源链接）"})
+                elements.append({"tag": "markdown", "content": "[配图] 上传失败，见来源链接"})
         else:
             # image is a URL
             elements.append({"tag": "img", "url": img, "alt": {"tag": "plain_text", "content": "配图"}})
@@ -159,7 +159,7 @@ def build_card(payload, zh, language='en'):
 
     card = {
         "header": {
-            "title": {"tag": "plain_text", "content": f"📚 {esc_md(book_title)} · {esc_md(topic)}"},
+            "title": {"tag": "plain_text", "content": f"{esc_md(book_title)} · {esc_md(topic)}"},
             "template": "blue"
         },
         "elements": elements
