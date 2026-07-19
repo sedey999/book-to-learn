@@ -17,7 +17,9 @@ All paths are relative to this script's directory.
 """
 import json, os, sys, re, html, argparse, datetime, shutil
 
-BASE = os.path.dirname(os.path.abspath(__file__))
+# Go up one level from scripts/ to get to skill root
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+BASE = os.path.dirname(SCRIPT_DIR)
 CARDS_DIR = os.path.join(BASE, 'cards')
 DELIVERED_DIR = os.path.join(BASE, 'delivered')
 INDEX_PATH = os.path.join(BASE, 'index.json')

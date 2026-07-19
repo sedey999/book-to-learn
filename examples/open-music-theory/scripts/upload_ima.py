@@ -19,7 +19,9 @@ Exit codes:
 """
 import json, sys, os, subprocess, argparse
 
-BASE = os.path.dirname(os.path.abspath(__file__))
+# Scripts live in <skill-root>/scripts/, so skill root is one level up
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+BASE = os.path.dirname(SCRIPT_DIR)
 
 
 def find_ima_skill_dir():
@@ -27,6 +29,7 @@ def find_ima_skill_dir():
     env_dir = os.environ.get('IMA_SKILL_DIR', '').strip()
     if env_dir:
         candidates.append(env_dir)
+    # Look for ima-skill in the same parent as omt-daily-push skill root
     candidates.append(os.path.normpath(os.path.join(BASE, '..', 'ima-skill')))
     candidates.append(os.path.expanduser('~/.openclaw/skills/ima-skill'))
     candidates.append(os.path.expanduser('~/.agents/skills/ima-skill'))
@@ -152,7 +155,7 @@ def find_folder_by_name(kb_id, name):
 
 def notify_expired(reason):
     """Invoke notify_key_expired.py (prints to stderr; fires webhook if IMA_KEY_EXPIRED_WEBHOOK set)."""
-    script = os.path.join(BASE, 'notify_key_expired.py')
+    script = os.path.join(SCRIPT_DIR, 'notify_key_expired.py')
     if os.path.isfile(script):
         subprocess.run([sys.executable, script, reason], timeout=30)
 

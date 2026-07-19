@@ -80,33 +80,37 @@ export OMT_FOLDER_NAME="目标文件夹名称"
 
 ```bash
 # 查看当前进度
-python3 push_card.py status
+python3 scripts/push_card.py status
 
 # 手动触发推送（测试用）
-python3 push_card.py next --force
+python3 scripts/push_card.py next --force
 
 # 批量抓取所有卡片图片（一次性更新 items.json）
 python3 scripts/extract_images.py
 
 # 单独测试 PDF 生成
-python3 gen_card_pdf.py --payload payload.json --zh zh.json
+python3 scripts/gen_card_pdf.py --payload payload.json --zh zh.json
 ```
 
 ## 📁 文件结构
 
-| 文件 | 说明 |
-|------|------|
-| `SKILL.md` | 完整使用文档 |
-| `push_card.py` | 进度管理 + 卡片载荷生成 |
-| `gen_card_pdf.py` | PDF 生成（weasyprint） |
-| `upload_ima.py` | IMA 知识库上传 |
-| `notify_key_expired.py` | 密钥失效通知 |
-| `items.json` | 118 个知识点完整数据 |
-| `scripts/extract_images.py` | 图片抓取脚本 |
-| `scripts/card_slug_map.py` | 卡片→章节精确映射表 |
-| `progress.json` | 推送进度（自动维护） |
-| `daily-progress.md` | 每日推送日志 |
-| `prompts.md` | 定时任务配置示例 |
+```
+omt-daily-push/
+├── SKILL.md              # 完整使用文档
+├── README.md             # 本文件
+├── items.json            # 118 个知识点完整数据
+├── index.json            # 卡片推送顺序索引
+├── progress.json         # 推送进度（自动维护）
+├── daily-progress.md     # 每日推送日志
+├── prompts.md            # 定时任务配置示例
+└── scripts/              # 所有可执行脚本
+    ├── push_card.py           # 进度管理 + 卡片载荷生成
+    ├── gen_card_pdf.py         # PDF 生成（weasyprint）
+    ├── upload_ima.py           # IMA 知识库上传
+    ├── notify_key_expired.py   # 密钥失效通知
+    ├── extract_images.py       # 图片抓取脚本
+    └── card_slug_map.py        # 卡片→章节精确映射表
+```
 
 ## ⚙️ 定时调度
 

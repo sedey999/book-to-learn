@@ -148,7 +148,7 @@ export IMA_KEY_EXPIRED_WEBHOOK="https://open.feishu.cn/open-apis/bot/v2/hook/<yo
 ### Step 1：获取下一张卡片载荷
 
 ```bash
-cd $SD && python3 push_card.py next --force > /tmp/omt_payload.json
+cd $SD && python3 scripts/push_card.py next --force > /tmp/omt_payload.json
 ```
 
 解析输出 JSON。若含 `"skip": true`：
@@ -231,7 +231,7 @@ cd $SD && python3 scripts/extract_images.py                    # 批量全部
 ### Step 6：生成卡片式 PDF
 
 ```bash
-cd $SD && python3 gen_card_pdf.py --payload /tmp/omt_payload.json --zh /tmp/omt_zh.json
+cd $SD && python3 scripts/gen_card_pdf.py --payload /tmp/omt_payload.json --zh /tmp/omt_zh.json
 ```
 
 PDF 规格：A4、卡片式设计、大字号（中文正文 18px、英文 15px、标题 25px）、中英对照、术语表、Noto CJK 字体。
@@ -258,7 +258,7 @@ PDF 规格：A4、卡片式设计、大字号（中文正文 18px、英文 15px�
 #### 7a. 上传主 PDF
 
 ```bash
-cd $SD && python3 upload_ima.py --file "/tmp/OMT_<date>_<nextId>.pdf"
+cd $SD && python3 scripts/upload_ima.py --file "/tmp/OMT_<date>_<nextId>.pdf"
 ```
 
 脚本自动：动态定位 ima-skill → 定位知识库（默认名称见安装步骤 4）→ 定位目标文件夹 →
@@ -283,7 +283,7 @@ preflight 检查 → 重名检查 → create_media → COS 上传 → add_knowle
    - 如果是 `HTML document`（即被重定向到网页），说明链接失效或不是文件，**跳过并记录**
 4. **重命名**：统一格式为 `OMT_YYYY-MM-DD_<card_id>_<原文件名>`
    - 例：`OMT_2026-07-04_ch01-01_WK-Introduction-to-Western-Musical-Notation.pdf`
-5. **逐个上传**：对每个真正的文件附件执行 `python3 upload_ima.py --file <附件路径>`
+5. **逐个上传**：对每个真正的文件附件执行 `python3 scripts/upload_ima.py --file <附件路径>`
 6. **记录**：在 daily-progress.md 中标注附件数量和文件名
 
 附件上传失败不影响主推送进度，仅记录失败信息。
@@ -291,7 +291,7 @@ preflight 检查 → 重名检查 → create_media → COS 上传 → add_knowle
 ### Step 8：记录推送进度（仅主 PDF 上传成功后）
 
 ```bash
-cd $SD && python3 push_card.py mark <nextId> success
+cd $SD && python3 scripts/push_card.py mark <nextId> success
 ```
 
 ### Step 9：更新 daily-progress.md 进度文件
@@ -312,28 +312,29 @@ cd $SD && python3 push_card.py mark <nextId> success
 
 ## 辅助命令
 
-- 查看进度：`cd $SD && python3 push_card.py status`
-- 手动重推某张：`python3 push_card.py next --force`
+- 查看进度：`cd $SD && python3 scripts/push_card.py status`
+- 手动重推某张：`python3 scripts/push_card.py next --force`
 - 重置进度：编辑 progress.json，lastPushedId/lastPushDate 置 null，清空 pushHistory
-- 单独测试 PDF 生成：`python3 gen_card_pdf.py --payload <payload.json> --zh <zh.json> --out test.pdf`
-- 单独测试上传：`python3 upload_ima.py --file <xxx.pdf>`
-- （可选，需 cards/ 目录）渲染双语 HTML：`python3 push_card.py render <id> --zh <zh.json>`
+- 单独测试 PDF 生成：`python3 scripts/gen_card_pdf.py --payload <payload.json> --zh <zh.json> --out test.pdf`
+- 单独测试上传：`python3 scripts/upload_ima.py --file <xxx.pdf>`
+- （可选，需 cards/ 目录）渲染双语 HTML：`python3 scripts/push_card.py render <id> --zh <zh.json>`
 
 ## 文件说明
 
 | 文件 | 作用 |
 |------|------|
 | `SKILL.md` | 本指令文件 |
-| `push_card.py` | 进度管理 + 卡片载荷提取（status/next/render/mark/weekday） |
-| `gen_card_pdf.py` | 生成卡片式双语 PDF（weasyprint） |
-| `upload_ima.py` | 上传 PDF/附件到 IMA 知识库文件夹（含密钥失效检测、动态 ima-skill 路径查找） |
-| `notify_key_expired.py` | 密钥失效通知（stderr + 可选 $IMA_KEY_EXPIRED_WEBHOOK） |
 | `items.json` | 118 个知识点知识库（中英文字段 + 可选图片 base64 缓存） |
 | `index.json` | 卡片推送顺序索引 |
 | `progress.json` | 推送进度（自动维护，默认为 0） |
 | `daily-progress.md` | 每日执行进度记录文件 |
 | `prompts.md` | 定时任务配置建议（通用示例） |
+| `scripts/push_card.py` | 进度管理 + 卡片载荷提取（status/next/render/mark/weekday） |
+| `scripts/gen_card_pdf.py` | 生成卡片式双语 PDF（weasyprint） |
+| `scripts/upload_ima.py` | 上传 PDF/附件到 IMA 知识库文件夹（含密钥失效检测、动态 ima-skill 路径查找） |
+| `scripts/notify_key_expired.py` | 密钥失效通知（stderr + 可选 $IMA_KEY_EXPIRED_WEBHOOK） |
 | `scripts/extract_images.py` | 从 pressbooks 抓取 Example 图片并缓存到 items.json |
+| `scripts/card_slug_map.py` | 卡片 ID → pressbooks 章节精确映射表 |
 | `cards/`（可选）| 118 张纯英文 HTML 卡片源，若存在则优先使用；不存在则直接读取 items.json |
 
 ## 定时任务配置
