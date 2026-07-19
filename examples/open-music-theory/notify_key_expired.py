@@ -1,45 +1,81 @@
 #!/usr/bin/env python3
 """
-Notify Feishu webhook when IMA API key is expired.
-Usage: python notify_key_expired.py [reason]
-Sends a message asking the user for the latest IMA API Key & Client ID.
+Notify when IMA API key is expired/invalid.
+
+Behavior:
+  - Always prints a human-readable notification to stderr and exits with code 1.
+  - If the environment variable IMA_KEY_EXPIRED_WEBHOOK is set, POSTs a JSON
+    payload to that webhook URL (compatible with Feishu/Lark/Slack custom bots).
+
+Usage:
+  python notify_key_expired.py [reason]
+
+No credentials, webhook URLs, or user identifiers are hardcoded.
 """
-import json, sys, os, urllib.request, datetime
+import json
+import os
+import sys
+import urllib.request
+import datetime
 
-WEBHOOK_URL = "https://open.feishu.cn/open-apis/bot/v2/hook/YOUR_WEBHOOK_TOKEN"
 
-def send(reason=""):
+def build_text(reason=""):
     now = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    text = (
-        "[通知] IMA 知识库 API 密钥失效通知\n"
+    return (
+        "🔔 IMA 知识库 API 密钥失效通知\n"
         f"时间：{now}\n"
-        "任务：Open Music Theory 每日双语卡片推送\n"
+        "任务：omt-daily-push 每日双语卡片推送\n"
         f"原因：{reason or 'API 调用返回认证失败（密钥过期或无效）'}\n\n"
         "请提供最新的 IMA OpenAPI 凭证以继续推送：\n"
         "1. 打开 https://ima.qq.com/agent-interface 获取新的 Client ID 和 API Key\n"
         "2. 更新配置：\n"
         '   echo "<新Client ID>" > ~/.config/ima/client_id\n'
-        '   printf \'%s\' "<新API Key>" > ~/.config/ima/api_key\n'
-        "\n[警告] 本次卡片推送未完成，不计入进度，凭证更新后将自动重推同一张卡片。"
+        "   printf '%s' \"<新API Key>\" > ~/.config/ima/api_key\n"
+        "\n⚠️ 本次卡片推送未完成，不计入进度，凭证更新后将自动重推同一张卡片。"
     )
+
+
+def send_webhook(url, text):
+    """POST text to a generic incoming webhook. Works with Feishu/Lark custom bots."""
+    # Feishu/Lark custom bot format
     body = json.dumps({
         "msg_type": "text",
-        "content": {"text": text}
+        "content": {"text": text},
     }, ensure_ascii=False).encode("utf-8")
-    req = urllib.request.Request(WEBHOOK_URL, data=body, headers={
+    req = urllib.request.Request(url, data=body, headers={
         "Content-Type": "application/json; charset=utf-8",
-        "User-Agent": "Mozilla/5.0"
+        "User-Agent": "omt-daily-push/1.0",
     })
     try:
-        resp = urllib.request.urlopen(req, timeout=15)
-        data = json.load(resp)
-        ok = data.get("code") == 0 or data.get("StatusCode") == 0 or data.get("code") == 0
-        print(json.dumps({"sent": True, "feishu_resp": data, "ok": ok}, ensure_ascii=False))
-        return 0 if ok else 1
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            data = json.load(resp)
+        return True, data
     except Exception as e:
-        print(json.dumps({"sent": False, "error": str(e)}, ensure_ascii=False))
-        return 1
+        return False, str(e)
+
+
+def main():
+    reason = sys.argv[1] if len(sys.argv) > 1 else ""
+    text = build_text(reason)
+
+    # Always notify via stderr so the caller (agent/CI log) sees it.
+    print(text, file=sys.stderr)
+
+    webhook = os.environ.get("IMA_KEY_EXPIRED_WEBHOOK", "").strip()
+    webhook_status = {"webhook_configured": bool(webhook)}
+    if webhook:
+        ok, info = send_webhook(webhook, text)
+        webhook_status["webhook_sent"] = ok
+        webhook_status["webhook_info"] = info
+
+    # Machine-readable summary on stdout.
+    print(json.dumps({
+        "event": "ima_key_expired",
+        "notified": True,
+        **webhook_status,
+    }, ensure_ascii=False))
+    return 0 if not webhook or webhook_status.get("webhook_sent") else 1
+
 
 if __name__ == "__main__":
-    reason = sys.argv[1] if len(sys.argv) > 1 else ""
-    sys.exit(send(reason))
+    sys.exit(main())

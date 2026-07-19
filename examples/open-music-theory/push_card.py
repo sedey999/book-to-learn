@@ -62,32 +62,37 @@ def extract_card_id(filename):
     m = re.match(r'card_(.+)\.html', filename)
     return m.group(1) if m else None
 
+def normalize_quotes(text):
+    """Replace smart single quotes (U+2018/U+2019) with ASCII apostrophe (U+0027)."""
+    return text.replace('\u2018', "'").replace('\u2019', "'")
+
+
 def extract_text_from_html(htmlstr):
     """Extract visible English text sections from a card HTML for translation."""
     out = {}
     # core idea
     m = re.search(r'<div class="core">(.*?)</div>', htmlstr, flags=re.S)
-    out['coreIdeaEn'] = html.unescape(re.sub(r'<[^>]+>', '', m.group(1))).strip() if m else ''
+    out['coreIdeaEn'] = normalize_quotes(html.unescape(re.sub(r'<[^>]+>', '', m.group(1))).strip()) if m else ''
     # explanation paragraphs
     m = re.search(r'<div class="expl">(.*?)</div>', htmlstr, flags=re.S)
     if m:
         paras = re.findall(r'<p>(.*?)</p>', m.group(1), flags=re.S)
-        out['explanationEn'] = '\n'.join(html.unescape(re.sub(r'<[^>]+>', '', p)).strip() for p in paras)
+        out['explanationEn'] = '\n'.join(normalize_quotes(html.unescape(re.sub(r'<[^>]+>', '', p)).strip()) for p in paras)
     else:
         out['explanationEn'] = ''
     # quote
     m = re.search(r'<div class="quote">(.*?)</div>', htmlstr, flags=re.S)
-    out['quoteEn'] = html.unescape(re.sub(r'<[^>]+>', '', m.group(1))).strip() if m else ''
+    out['quoteEn'] = normalize_quotes(html.unescape(re.sub(r'<[^>]+>', '', m.group(1))).strip()) if m else ''
     # application
     m = re.search(r'<div class="app">(.*?)</div>', htmlstr, flags=re.S)
     if m:
         paras = re.findall(r'<p>(.*?)</p>', m.group(1), flags=re.S)
-        out['applicationScenarios'] = '\n'.join(html.unescape(re.sub(r'<[^>]+>', '', p)).strip() for p in paras)
+        out['applicationScenarios'] = '\n'.join(normalize_quotes(html.unescape(re.sub(r'<[^>]+>', '', p)).strip()) for p in paras)
     else:
         out['applicationScenarios'] = ''
     # topic
     m = re.search(r'<div class="topic">(.*?)</div>', htmlstr, flags=re.S)
-    out['topic'] = html.unescape(re.sub(r'<[^>]+>', '', m.group(1))).strip() if m else ''
+    out['topic'] = normalize_quotes(html.unescape(re.sub(r'<[^>]+>', '', m.group(1))).strip()) if m else ''
     return out
 
 
@@ -101,7 +106,7 @@ def cmd_status(args):
     print('History entries:', len(progress.get('pushHistory', [])))
     nxt = get_next_index(progress, index)
     if nxt is None:
-        print('Status: ALL CARDS PUSHED [DONE]')
+        print('Status: ALL CARDS PUSHED ✓')
     else:
         fn = index['items'][nxt]
         print('Next card:', fn, '(#%d)' % (nxt + 1))
@@ -126,13 +131,22 @@ def cmd_next(args):
         return
     filename = index['items'][nxt]
     card_id = extract_card_id(filename)
-    card_path = os.path.join(CARDS_DIR, filename)
-    with open(card_path, 'r', encoding='utf-8') as f:
-        htmlstr = f.read()
-    sections = extract_text_from_html(htmlstr)
-    # terminology from items.json
     items = load_json(ITEMS_PATH)
     item = next((it for it in items if it['id'] == card_id), {})
+    card_path = os.path.join(CARDS_DIR, filename)
+    if os.path.exists(card_path):
+        with open(card_path, 'r', encoding='utf-8') as f:
+            htmlstr = f.read()
+        sections = extract_text_from_html(htmlstr)
+    else:
+        # cards/ 目录不存在时，直接从 items.json 取文本
+        sections = {
+            'topic': item.get('topic', ''),
+            'coreIdeaEn': item.get('coreIdeaEn', ''),
+            'explanationEn': item.get('explanationEn', ''),
+            'quoteEn': item.get('quoteEn', ''),
+            'applicationScenarios': item.get('applicationScenarios', ''),
+        }
     payload = {
         'nextId': card_id,
         'filename': filename,
@@ -145,6 +159,7 @@ def cmd_next(args):
         'quoteEn': sections['quoteEn'],
         'applicationScenarios': sections['applicationScenarios'],
         'image': item.get('image', ''),
+        'images': item.get('images', []),
         'relatedLinks': item.get('relatedLinks', []),
         'terminology': item.get('terminology', []),
         'source': item.get('link', '') or index.get('bookSource', ''),
