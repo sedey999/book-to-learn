@@ -6,8 +6,9 @@
 
 - 📚 **118 张知识点卡片**：完整覆盖 OMT 教材全部核心内容，内置在 `items.json`
 - 🌍 **中英双语对照**：专业术语联网核对权威译法，实时翻译保证准确
-- 🖼️ **原文图片支持**：自动从 pressbooks 抓取每个知识点的 Example 图片，精确映射到对应卡片
+- 🖼️ **原文图片支持**：自动从 pressbooks 抓取每个知识点的 Example 图片（含 WordPress 原图升级），支持 MuseScore 交互式乐谱自动转静态图，精确映射到对应卡片
 - 📄 **精美 PDF 排版**：卡片式设计、大字号、Noto CJK 中文字体、术语对照表、相关链接
+- 🔍 **图片强制复核**：PDF 生成后自动用 PyMuPDF 校验图片顺序/完整性/位置一致性，未通过禁止上传
 - ☁️ **IMA 知识库上传**：自动定位知识库和文件夹，支持重名检查，支持附件上传
 - 📊 **进度跟踪**：成功上传后才更新进度，失败自动重试，完整日志记录
 - 🔔 **密钥失效提醒**：支持 webhook 通知，凭证过期不丢进度
@@ -72,9 +73,10 @@ export OMT_FOLDER_NAME="目标文件夹名称"
 3. 联网核对每个术语的权威中文译法
 4. 完整翻译所有字段，保持专业准确
 5. 生成卡片式双语 PDF
-6. 下载相关附件（PDF/DOCX/XLSX 等）
-7. 上传 PDF 和附件到 IMA 指定文件夹
-8. 更新进度，记录日志
+6. **图片复核**：PyMuPDF 自动校验图片顺序和位置
+7. 下载相关附件（PDF/DOCX/XLSX 等）
+8. 上传 PDF 和附件到 IMA 指定文件夹
+9. 更新进度，记录日志
 
 ## 🛠️ 辅助命令
 
@@ -90,6 +92,9 @@ python3 scripts/extract_images.py
 
 # 单独测试 PDF 生成
 python3 scripts/gen_card_pdf.py --payload payload.json --zh zh.json
+
+# 图片复核（PDF 生成后自动调用，也可手动运行）
+python3 scripts/review_pdf_images.py --pdf output.pdf --payload payload.json --zh zh.json
 ```
 
 ## 📁 文件结构
@@ -108,7 +113,8 @@ omt-daily-push/
     ├── gen_card_pdf.py         # PDF 生成（weasyprint）
     ├── upload_ima.py           # IMA 知识库上传
     ├── notify_key_expired.py   # 密钥失效通知
-    ├── extract_images.py       # 图片抓取脚本
+    ├── extract_images.py       # 图片抓取（含 WordPress 原图 + MuseScore iframe 支持）
+    ├── review_pdf_images.py    # PDF 图片复核（顺序/完整性/位置校验）
     └── card_slug_map.py        # 卡片→章节精确映射表
 ```
 

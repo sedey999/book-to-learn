@@ -188,7 +188,7 @@ def fetch_page(url):
 
 
 def extract_images_from_html(html):
-    """从 HTML 提取所有 figure 中的图片"""
+    """从 HTML 提取所有 figure 中的图片 + MuseScore iframe 嵌入的乐谱"""
     images = []
 
     # 找 <figure> 标签
@@ -211,34 +211,193 @@ def extract_images_from_html(html):
                 'alt': alt.group(1) if alt else ''
             })
 
+    # 处理不在 <figure> 内的 <img>（pressbooks 经常直接放 img）
+    # 找到所有 img，排除 logo/cover，通过上下文寻找 Example caption
+    handled_urls = set()
+    for img in images:
+        handled_urls.add(img['src'])
+
+    # 收集页面中所有 iframe（MuseScore / YouTube）
+    iframes = re.findall(r'<iframe[^>]+src="([^"]+)"[^>]*>', html)
+    for iframe_url in iframes:
+        if 'musescore.com' in iframe_url:
+            # MuseScore 交互式乐谱 → 尝试通过 web archive 获取静态 SVG
+            ms_img = _fetch_musescore_as_image(iframe_url, html)
+            if ms_img:
+                images.append(ms_img)
+                print(f"    [INFO] MuseScore 乐谱已转为静态图片")
+        # YouTube iframe 跳过（无静态图片）
+
     return images
 
 
+def _fetch_musescore_as_image(iframe_url, html):
+    """尝试从 MuseScore iframe 获取乐谱的静态 PNG 图片。
+    
+    MuseScore 被 Cloudflare 保护，直接访问被 403。
+    策略：通过 web.archive.org 的缓存获取 SVG 乐谱，转换为 PNG。
+    失败时返回 None。
+    """
+    import subprocess, tempfile, gzip as gzip_mod
+    
+    # 从 iframe URL 提取 score ID
+    # 格式: https://musescore.com/user/XXX/scores/YYY/embed 或 .../scores/YYY/s/CODE/embed
+    score_m = re.search(r'/scores/(\d+)', iframe_url)
+    if not score_m:
+        return None
+    score_id = score_m.group(1)
+    
+    # 先通过 web archive 获取 embed HTML，从中提取 score hash
+    try:
+        embed_url = f'https://web.archive.org/web/2024/https://musescore.com/user/32728834/scores/{score_id}/embed'
+        result = subprocess.run(['curl', '-sL', '--max-time', '20', embed_url],
+                                capture_output=True, timeout=25)
+        embed_html = result.stdout.decode('utf-8', errors='replace')
+        
+        # 从 embed HTML 中提取 score hash (image_path)
+        hash_m = re.search(r'scoredata/g/([a-f0-9]+)/', embed_html)
+        if not hash_m:
+            return None
+        score_hash = hash_m.group(1)
+        
+        svg_url = f'https://musescore.com/static/musescore/scoredata/g/{score_hash}/score_0.svg'
+        
+        # 尝试从 web archive 下载 SVG（尝试多个年份）
+        svg_data = None
+        for year in ['2025', '2024', '2023', '2022']:
+            archive_url = f'https://web.archive.org/web/{year}id_/{svg_url}'
+            r = subprocess.run(['curl', '-sL', '--max-time', '20', archive_url],
+                               capture_output=True, timeout=25)
+            if r.returncode == 0 and len(r.stdout) > 500:
+                # Check if it's SVG (not HTML)
+                if b'<svg' in r.stdout[:200]:
+                    svg_data = r.stdout
+                    break
+                # Might be gzip compressed
+                try:
+                    decompressed = gzip_mod.decompress(r.stdout)
+                    if b'<svg' in decompressed[:200]:
+                        svg_data = decompressed
+                        break
+                except:
+                    pass
+        
+        if not svg_data:
+            # Trigger a fresh save
+            subprocess.run(['curl', '-sL', '--max-time', '60',
+                           f'https://web.archive.org/save/{svg_url}'],
+                          capture_output=True, timeout=65)
+            import time
+            time.sleep(15)
+            r = subprocess.run(['curl', '-sL', '--max-time', '20',
+                               f'https://web.archive.org/web/2025id_/{svg_url}'],
+                              capture_output=True, timeout=25)
+            if r.returncode == 0 and len(r.stdout) > 500:
+                if b'<svg' in r.stdout[:200]:
+                    svg_data = r.stdout
+                else:
+                    try:
+                        svg_data = gzip_mod.decompress(r.stdout)
+                    except:
+                        pass
+        
+        if not svg_data or b'<svg' not in svg_data[:500]:
+            return None
+        
+        # Convert SVG to PNG using cairosvg
+        try:
+            import cairosvg
+            import io
+            png_data = cairosvg.svg2png(bytestring=svg_data, output_width=1024)
+        except ImportError:
+            # Fallback: return SVG directly (weasyprint supports SVG in <img>)
+            import base64
+            b64 = base64.b64encode(svg_data).decode('ascii')
+            return {
+                'src': f'data:image/svg+xml;base64,{b64}',
+                'caption': f'MuseScore score (ID {score_id})',
+                'alt': f'MuseScore score {score_id}',
+            }
+        
+        # Find caption from surrounding HTML
+        # Look for Example N text near the iframe
+        iframe_m = re.search(re.escape(iframe_url), html)
+        caption = f'Example (MuseScore {score_id})'
+        if iframe_m:
+            ctx = html[max(0,iframe_m.start()-500):iframe_m.end()+500]
+            ex_m = re.search(r'Example\s*(?:&nbsp;)?(\d+)[^<]*', ctx)
+            if ex_m:
+                caption = f'Example {ex_m.group(1)}. MuseScore score.'
+        
+        import base64
+        b64 = base64.b64encode(png_data).decode('ascii')
+        return {
+            'src': f'data:image/png;base64,{b64}',
+            'caption': caption,
+            'alt': caption,
+        }
+    except Exception as e:
+        print(f"    [WARN] MuseScore 处理失败: {e}")
+        return None
+
+
+def get_original_url(url):
+    """WordPress 会生成带尺寸后缀的缩略图（如 -300x38.png），去掉后缀得到原图 URL。
+    例如：.../foo-300x38.png -> .../foo.png
+    """
+    # 匹配 -WxH 后缀（在扩展名前面）
+    m = re.match(r'^(.+)-(\d+)x(\d+)(\.\w+)$', url)
+    if m:
+        orig = m.group(1) + m.group(4)
+        return orig
+    return url
+
+
 def download_image(url):
-    """下载图片并返回 base64 data URL"""
-    cache_key = hashlib.md5(url.encode()).hexdigest()[:16]
+    """下载图片并返回 base64 data URL。
+    
+    优先尝试下载原图（去掉 WordPress 缩略图尺寸后缀 -300x38.png）。
+    如果原图失败则降级到缩略图 URL。
+    """
+    # 尝试先下载原图（去掉缩略图尺寸后缀）
+    url_orig = get_original_url(url)
+    # 使用原图 URL 作为缓存 key（避免缩略图缓存被误用为原图）
+    cache_key = hashlib.md5(url_orig.encode()).hexdigest()[:16]
     cache_path = CACHE_DIR / cache_key
 
     if cache_path.exists():
         with open(cache_path, 'rb') as f:
             img_data = f.read()
     else:
-        req = urllib.request.Request(url, headers=HEADERS)
-        try:
-            with urllib.request.urlopen(req, timeout=30) as resp:
-                img_data = resp.read()
-        except Exception as e:
-            print(f"    [ERROR] 下载图片失败: {e}")
+        def _try(req_url):
+            try:
+                req = urllib.request.Request(req_url, headers=HEADERS)
+                with urllib.request.urlopen(req, timeout=30) as resp:
+                    return resp.read()
+            except Exception:
+                return None
+
+        img_data = None
+        # 先尝试原图（如果 URL 与缩略图不同）
+        if url_orig != url:
+            img_data = _try(url_orig)
+            if img_data:
+                url = url_orig  # 记录实际下载的是原图
+        # 原图失败则用缩略图
+        if img_data is None:
+            img_data = _try(url)
+
+        if img_data is None:
+            print(f"    [ERROR] 下载图片失败（原图和缩略图都不行）")
             return None
 
         # 验证是真正的图片
-        # 检查是否为有效图片（PNG: 89 50 4E 47, JPEG: FF D8, GIF: 47 49 46 38, WebP: 52 49 46 46）
         is_valid = (img_data[:4] == b'\x89PNG' or
                     img_data[:2] == b'\xff\xd8' or
                     img_data[:4] == b'GIF8' or
                     img_data[:4] == b'RIFF')
         if not is_valid:
-            print(f"    [WARN] 不是图片格式，跳过")
+            print(f"    [WARN] 返回内容不是图片格式，跳过")
             return None
 
         with open(cache_path, 'wb') as f:

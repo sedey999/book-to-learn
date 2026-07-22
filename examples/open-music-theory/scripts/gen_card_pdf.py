@@ -65,20 +65,102 @@ def build_html(payload, zh, date_str):
     sections.append(block('应用场景', 'Application', zh.get('applicationZh',''), payload.get('applicationScenarios',''), '#bf8700', md=True))
 
     # images — 支持 __IMAGE_X__ 标记插入到中文对应位置
+    # 机制：翻译中的 __IMAGE_X__ 标记按段落顺序处理；存在的图就地插入，不存在的标警告；
+    #       payload 里有但翻译没标记的图（漏标），按 Example 编号升序放在 explanation 末尾
     images = payload.get('images', [])
     img_map = {}  # example_num -> img dict
-    unmatched = []
     for img in images:
         caption = img.get('caption', '')
         m = re.search(r'Example\s+(\d+)', caption)
         if m:
             ex_num = int(m.group(1))
             img_map[ex_num] = img
-        else:
-            unmatched.append(img)
+
+    # 收集翻译中标记的所有图号
+    expl_zh = zh.get('explanationZh', '')
+    tagged_nums = set()
+    for tm in re.finditer(r'__IMAGE_(\d+)__', expl_zh):
+        tagged_nums.add(int(tm.group(1)))
+
+    # ========== 严格校验（strict validation）==========
+    # 规则：
+    #   1. 翻译标记的 __IMAGE_X__ 必须全部在 payload 图片中存在（防止翻译幻觉标了不存在的图）
+    #   2. payload 中所有图片必须全部被翻译标记（防止漏标）
+    #   3. 标记出现顺序必须与 Example 编号升序一致（防止 20 跑到 15 前面）
+    #   4. 图片插入位置的上下文文字必须提到对应 Example 编号（防止标记位置错位）
+    import sys as _sys
+    validation_errors = []
+    validation_warnings = []
+
+    missing_tags = []  # 翻译标了但 payload 没有的图号
+    untagged_imgs = []  # payload 有但翻译没标的图号
+    for n in tagged_nums:
+        if n not in img_map:
+            missing_tags.append(n)
+    for n in img_map:
+        if n not in tagged_nums:
+            untagged_imgs.append(n)
+    if missing_tags:
+        validation_errors.append(
+            f'翻译标记了不存在的 Example 图片号: {sorted(missing_tags)}。'
+            f'payload 中只有 Example {sorted(img_map.keys())}。'
+            f'请在翻译中删除这些错误的 __IMAGE_X__ 标记（原文可能只是文字引用，并无对应配图）。'
+        )
+    if untagged_imgs:
+        validation_errors.append(
+            f'payload 有 {len(untagged_imgs)} 张 Example 图片但翻译未标记: {sorted(untagged_imgs)}。'
+            f'请在翻译 explanationZh 的对应段落末尾添加 __IMAGE_X__ 标记。'
+        )
+
+    # 检查标记顺序是否按 Example 编号升序排列
+    tag_order = [int(m.group(1)) for m in re.finditer(r'__IMAGE_(\d+)__', expl_zh)]
+    if tag_order and tag_order != sorted(tag_order):
+        # 找出具体哪些位置顺序错乱
+        disorder_pairs = []
+        for i in range(len(tag_order)-1):
+            if tag_order[i] > tag_order[i+1]:
+                disorder_pairs.append(f'Example {tag_order[i]} 在 Example {tag_order[i+1]} 前面')
+        validation_errors.append(
+            f'图片标记顺序错误！出现顺序 {tag_order} 不是升序排列。\n'
+            f'  错乱详情：{"; ".join(disorder_pairs)}\n'
+            f'  图片必须按照 Example 1→2→3… 的编号顺序依次出现，编号大的不能排在编号小的前面。\n'
+            f'  请检查 explanationZh 中各 __IMAGE_X__ 标记的位置是否和原文 Example 出现顺序一致。'
+        )
+
+    # 检查标记位置上下文是否提到了对应 Example（防止标记放在错误段落）
+    if not validation_errors:
+        paras_with_tags = []
+        for para in expl_zh.split(chr(10)):
+            p = para.strip()
+            if not p:
+                continue
+            for tm in re.finditer(r'__IMAGE_(\d+)__', p):
+                ex_num = int(tm.group(1))
+                para_clean = re.sub(r'__IMAGE_\d+__', '', p)
+                # 检查段落中是否提到了 "示例 X" 或 "Example X"
+                if not re.search(rf'(示例|Example)\s*{ex_num}', para_clean, re.IGNORECASE):
+                    validation_warnings.append(
+                        f'__IMAGE_{ex_num}__ 标记所在的段落没有提到「示例 {ex_num}」或 "Example {ex_num}"，'
+                        f'可能插入位置不正确。段落内容（前60字）：{para_clean[:60]}'
+                    )
+                paras_with_tags.append((ex_num, para_clean[:60]))
+
+    # 输出
+    for w in validation_warnings:
+        print(f'[gen_card_pdf WARN] {w}', file=_sys.stderr)
+    if validation_errors:
+        print('[gen_card_pdf ERROR] ===== 图片标记校验失败，PDF 生成中止 =====', file=_sys.stderr)
+        for e in validation_errors:
+            print(f'[gen_card_pdf ERROR] {e}', file=_sys.stderr)
+        print('[gen_card_pdf ERROR] =============================================', file=_sys.stderr)
+        _sys.exit(3)  # 特殊退出码 3 = 图片校验失败（区别于 1=一般错误, 2=IMA 密钥失效）
+
+    # 保存图片插入顺序信息供后续复核脚本使用（写到 PDF 的 HTML 注释里不够好，改为返回）
+    # 这里 tag_order 是严格升序（上面已校验）
+    expected_image_order = tag_order if tag_order else sorted(img_map.keys())
 
     # 处理 explanationZh 中的 __IMAGE_X__ 标记
-    expl_zh = zh.get('explanationZh', '')
+    # 经过上面校验后，所有标记都存在且顺序升序，可以安全地按顺序插入
     if '__IMAGE_' in expl_zh:
         expl_parts = []
         for para in expl_zh.split(chr(10)):
@@ -86,46 +168,37 @@ def build_html(payload, zh, date_str):
             if not para_stripped:
                 continue
             if '__IMAGE_' in para_stripped:
-                tag_match = re.search(r'__IMAGE_(\d+)__', para_stripped)
-                if tag_match:
-                    ex_num = int(tag_match.group(1))
-                    para_clean = re.sub(r'__IMAGE_\d+__', '', para_stripped).strip()
-                    if para_clean:
-                        expl_parts.append('<p>%s</p>' % esc(para_clean))
-                    if ex_num in img_map:
-                        img = img_map[ex_num]
-                        cap_html = ''
-                        if img.get('caption'):
-                            cap_html = '<div class="img-caption">%s</div>' % esc(img['caption'])
-                        expl_parts.append('<div class="img-item">%s<img src="%s" alt="%s"></div>' %
-                                          (cap_html, esc(img['src']), esc(img.get('alt', ''))))
-                        del img_map[ex_num]
+                # 使用 re.split 处理同一段落中可能存在的多个标记
+                parts = re.split(r'(__IMAGE_\d+__)', para_stripped)
+                for part in parts:
+                    m = re.match(r'__IMAGE_(\d+)__', part)
+                    if m:
+                        ex_num = int(m.group(1))
+                        if ex_num in img_map:
+                            img = img_map[ex_num]
+                            cap_html = ''
+                            if img.get('caption'):
+                                cap_html = '<div class="img-caption">%s</div>' % esc(img['caption'])
+                            expl_parts.append('<div class="img-item" data-example="%d">%s<img src="%s" alt="%s"></div>' %
+                                              (ex_num, cap_html, esc(img['src']), esc(img.get('alt', ''))))
+                            img_map[ex_num] = None
+                    else:
+                        text = part.strip()
+                        if text:
+                            expl_parts.append('<p>%s</p>' % esc(text))
             else:
                 expl_parts.append('<p>%s</p>' % esc(para_stripped))
         expl_zh_html = chr(10).join(expl_parts)
     else:
-        expl_zh_html = ''.join('<p>%s</p>' % p for p in paras(expl_zh))
+        expl_parts = []
+        for para in expl_zh.split(chr(10)):
+            para_stripped = para.strip()
+            if para_stripped:
+                expl_parts.append('<p>%s</p>' % esc(para_stripped))
+        expl_zh_html = chr(10).join(expl_parts)
 
-    # 未匹配的图片放在 explanation 最上方
-    unmatched_html = ''
-    for img in list(unmatched):
-        src = img.get('src', '')
-        if src:
-            cap_html = ''
-            if img.get('caption'):
-                cap_html = '<div class="img-caption">%s</div>' % esc(img['caption'])
-            unmatched_html += '<div class="img-item">%s<img src="%s" alt="%s"></div>' % (
-                cap_html, esc(src), esc(img.get('alt', '')))
-    for ex_num, img in sorted(img_map.items()):
-        src = img.get('src', '')
-        if src:
-            cap_html = ''
-            if img.get('caption'):
-                cap_html = '<div class="img-caption">%s</div>' % esc(img['caption'])
-            unmatched_html += '<div class="img-item">%s<img src="%s" alt="%s"></div>' % (
-                cap_html, esc(src), esc(img.get('alt', '')))
-    if unmatched_html:
-        expl_zh_html = unmatched_html + expl_zh_html
+    # 校验已经保证所有图片都被标记了，不需要追加逻辑
+    # （如果走到这里说明 untagged_imgs 为空，上面已经 sys.exit 了）
 
     # 向后兼容：旧单图字段
     img_html = ''

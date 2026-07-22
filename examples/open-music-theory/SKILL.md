@@ -56,7 +56,7 @@ metadata:
 
 ```bash
 brew install python pango cairo gdk-pixbuf libffi
-pip3 install weasyprint
+pip3 install weasyprint pymupdf
 # 字体
 brew install --cask font-noto-sans-cjk-sc font-noto-serif-cjk-sc
 ```
@@ -67,7 +67,7 @@ brew install --cask font-noto-sans-cjk-sc font-noto-serif-cjk-sc
 sudo apt-get update
 sudo apt-get install -y python3-pip libpango-1.0-0 libharfbuzz0b libpangoft2-1.0-0 \
     fonts-noto-cjk
-pip3 install weasyprint
+pip3 install weasyprint pymupdf
 ```
 
 #### Windows
@@ -170,6 +170,16 @@ cd $SD && python3 scripts/extract_images.py                    # 批量全部
 
 这会从 pressbooks 页面抓取所有 figure 图片并缓存为 base64，批量模式输出到 `items_new.json`，确认无误后替换 `items.json`。
 
+**⚠️ 图片类型说明：**
+
+教材中的 Example 有三种形式，`extract_images.py` 处理能力不同：
+
+1. **静态图片（`<img>` / `<figure>`）**：自动抓取为 base64 内嵌到 PDF。这是最常见的形式。WordPress 缩略图会自动升级为原图。
+2. **MuseScore 交互式乐谱（`<iframe>` 来自 musescore.com）**：浏览器中是可交互/播放的乐谱。`extract_images.py` 会自动通过 web archive 缓存获取 SVG 矢量乐谱并转为 PNG。
+3. **YouTube 视频嵌入（`<iframe>` 来自 youtube.com）**：没有静态图片，无法嵌入 PDF，会被跳过。
+
+**翻译时如何区分：** payload 中 `images` 数组里有对应 Example 编号的图片才能加 `__IMAGE_X__` 标记。如果原文提到 "Example X" 但 payload.images 中没有该编号，说明这是视频或交互内容，**不要加标记**。
+
 ### Step 2：联网核对术语中文译法
 
 对 `terminology` 数组中每个英文术语，使用 **web search 工具**（agent 内置的联网搜索能力，如 `web_search` 工具）查询其在**音乐理论领域**的权威中文译法。检索词示例：
@@ -199,6 +209,10 @@ cd $SD && python3 scripts/extract_images.py                    # 批量全部
   - 例如：原文 "Example 3 shows correct noteheads..." → 中文 "示例 3 展示了正确的符头写法...__IMAGE_3__"
   - 这样 Step 6 生成 PDF 时，`gen_card_pdf.py` 会解析标记，将 `images` 数组中对应编号的 Example 图片插入到这个位置
   - 注意：只对 explanation（详细解释）段落添加标记，coreIdea / quote / application 不需要
+  - **⚠️ 标记顺序必须严格按 Example 编号升序排列**：`__IMAGE_1__` 必须出现在 `__IMAGE_2__` 之前，依此类推。Step 6 会强制校验顺序，乱序直接报错退出。
+  - **⚠️ 只能标记 payload 中实际存在的 Example 图片**：标记之前先确认 `payload.images` 中存在该 Example 编号的图片；如果原文只是文字引用但 payload 里没有对应图片（可能是 YouTube 视频或 MuseScore 交互内容），**不要加标记**。
+  - **⚠️ 如何确认图片是否存在**：查看 payload 中每张图片的 `caption` 字段（如 "Example 3. ..."），只有 caption 里有的 Example 编号才可以标记。如果 caption 里没有 "Example 3" 但原文提到了 Example 3，那通常是视频嵌入，无静态图。
+  - **⚠️ 同一段落多个标记**：如果同一个段落引用了两张相邻的图，可以写 `__IMAGE_6____IMAGE_7__`（两个标记紧挨着）。
 
 ### Step 4：翻译质量全面检查 ✨
 
@@ -234,24 +248,64 @@ cd $SD && python3 scripts/extract_images.py                    # 批量全部
 cd $SD && python3 scripts/gen_card_pdf.py --payload /tmp/omt_payload.json --zh /tmp/omt_zh.json
 ```
 
+**⚠️ 严格校验（会阻止错误 PDF 生成）：**
+
+`gen_card_pdf.py` 在生成 PDF 前会自动执行以下校验，**任何一项失败都会以退出码 3 报错并中止，不会产出 PDF**：
+
+1. **标记合法性**：所有 `__IMAGE_X__` 标记引用的 Example 编号必须在 `payload.images` 中存在（防止翻译幻觉标记不存在的图）
+2. **图片全覆盖**：`payload.images` 中所有 Example 图片都必须有对应的 `__IMAGE_X__` 标记（防止漏标）
+3. **顺序正确性**：标记出现顺序必须严格按 Example 编号升序（防止 "示例20跑到示例15前面" 之类的乱序）
+4. **位置合理性**：标记所在段落的中文文字必须提到对应「示例 X」或 "Example X"（warning 级别）
+
+如果报错退出，根据错误信息修正翻译 JSON（调整标记位置/删除错误标记/补充遗漏标记）后重新运行。
+
 PDF 规格：A4、卡片式设计、大字号（中文正文 18px、英文 15px、标题 25px）、中英对照、术语表、Noto CJK 字体。
 输出路径默认为 `/tmp/OMT_YYYY-MM-DD_<card_id>_<topicZh>.pdf`（如 `OMT_2026-06-29_ch01-01_西方音乐记谱法简介.pdf`）。
 **不要加 `--out` 参数**，让脚本自动从 `topicZh` 生成文件名。
 
-**多图支持（重要！图片插入到中文对应位置）：**
+**多图支持（图片插入到中文对应位置）：**
 
-`gen_card_pdf.py` 会自动处理 `payload.images` 数组中的图片，按以下逻辑渲染：
+`gen_card_pdf.py` 处理 `payload.images` 数组的逻辑：
 
-1. **解析 `explanationZh` 中的 `__IMAGE_X__` 标记**：每个标记对应第 X 张 Example 图片。标记由 Step 3 翻译时在中文段落末尾添加。
-   - 示例：`示例 3 展示了正确的符头写法...__IMAGE_3__`
-2. **匹配图片到标记**：遍历 `images` 数组，通过每张图片的 `caption` 字段（如 "Example 3. Correct noteheads..."）提取 Example 编号，找到对应的 `__IMAGE_X__` 标记位置
-3. **插入图片**：将图片 HTML（含 caption）替换到标记位置
-4. **未匹配的图片**：如果有图片的 Example 编号在中文文本中没有对应的 `__IMAGE_X__` 标记，**放在 explanation 区域最上方**
-5. **向后兼容**：如果 payload 中无 `images` 数组，显示旧的单图字段（`payload.image`）
+1. **解析 `explanationZh` 中的 `__IMAGE_X__` 标记**：每个标记对应第 X 张 Example 图片
+2. **严格校验**（见上方）：标记全部合法、顺序正确、覆盖所有图片后才继续
+3. **插入图片**：将图片 HTML（含 caption 和 `data-example` 属性）替换到标记位置。同一段落支持多个标记（`__IMAGE_6____IMAGE_7__`）
+4. **向后兼容**：如果 payload 中无 `images` 数组，显示旧的单图字段（`payload.image`）
 
 **英文原文保留**：PDF 保持中英对照格式，中文 explanation 下方显示对应的英文原文。
 
 **图片样式**：每张图限制最大宽度 100%，圆角边框显示。图片标题（caption）居中显示在图片上方。
+
+### Step 6.5：图片复核（强制环节，未通过禁止上传 IMA）🔍
+
+> ⚠️ **此步骤必须执行，不得跳过！** 这是防止错误 PDF 上传到 IMA 的最后一道防线。
+
+PDF 生成成功后，必须用 `scripts/review_pdf_images.py` 复核图片顺序和位置：
+
+```bash
+cd $SD && python3 scripts/review_pdf_images.py \
+  --pdf "/tmp/OMT_<date>_<card_id>_<topicZh>.pdf" \
+  --payload /tmp/omt_payload.json \
+  --zh /tmp/omt_zh.json
+```
+
+**复核脚本会用 PyMuPDF 解析 PDF，检查三项：**
+
+1. **图片顺序**：PDF 中实际出现的 Example 图片是否严格按编号升序排列（防止顺序错乱）
+2. **图片完整性**：payload 中所有 Example 图片都必须出现在 PDF 中，不能遗漏
+3. **图片位置**：每张 Example 图片附近的正文文字是否提到对应「示例 X」/"Example X"（防止图片插入到错误段落）
+
+**退出码含义：**
+- `0` = ✅ 全部通过，可以上传
+- `4` = ❌ 复核失败（图片顺序/完整性/位置错误），**禁止上传 IMA**，必须修正翻译后重新生成 PDF
+
+**如果复核失败：**
+- 根据输出的错误信息定位问题
+- 回到 Step 3 修正翻译中的 `__IMAGE_X__` 标记位置
+- 重新执行 Step 6 和 Step 6.5，直到复核通过
+- 同时在日志中记录失败原因，方便后续排查
+
+**依赖：** 复核脚本需要 PyMuPDF（`pip3 install pymupdf`）。
 
 ### Step 7：上传主 PDF 和相关附件到 IMA 知识库
 
@@ -333,7 +387,8 @@ cd $SD && python3 scripts/push_card.py mark <nextId> success
 | `scripts/gen_card_pdf.py` | 生成卡片式双语 PDF（weasyprint） |
 | `scripts/upload_ima.py` | 上传 PDF/附件到 IMA 知识库文件夹（含密钥失效检测、动态 ima-skill 路径查找） |
 | `scripts/notify_key_expired.py` | 密钥失效通知（stderr + 可选 $IMA_KEY_EXPIRED_WEBHOOK） |
-| `scripts/extract_images.py` | 从 pressbooks 抓取 Example 图片并缓存到 items.json |
+| `scripts/extract_images.py` | 从 pressbooks 抓取 Example 图片并缓存到 items.json（支持 WordPress 原图获取 + MuseScore iframe 通过 web archive 缓存获取） |
+| `scripts/review_pdf_images.py` | **PDF 生成后强制复核**：用 PyMuPDF 检查图片顺序/完整性/位置，未通过则阻止上传 |
 | `scripts/card_slug_map.py` | 卡片 ID → pressbooks 章节精确映射表 |
 | `cards/`（可选）| 118 张纯英文 HTML 卡片源，若存在则优先使用；不存在则直接读取 items.json |
 
