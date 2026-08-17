@@ -57,12 +57,27 @@ printf '%s' "<your_api_key>" > ~/.config/ima/api_key
 
 ### 4. 配置目标知识库（可选）
 
-默认上传到知识库「【权威】音乐制作：风格与流派」→「每日一个知识点」文件夹。可通过环境变量自定义：
+默认上传到知识库「【权威】音乐制作：风格与流派」→「每日一个知识点」文件夹。
+
+**推荐方式：运行首次引导脚本**（交互式生成 config.json）：
+
+```bash
+python3 scripts/setup.py
+```
+
+或通过环境变量自定义：
 
 ```bash
 export OMT_KB_NAME="你的知识库名称"
 export OMT_FOLDER_NAME="目标文件夹名称"
 ```
+
+可选：配置推送失败 webhook 通知（飞书/Slack 机器人）：
+
+```bash
+export IMA_KEY_EXPIRED_WEBHOOK="https://open.feishu.cn/open-apis/bot/v2/hook/xxx"
+```
+或在 setup.py 引导时填入，写入 config.json。
 
 ## 📖 使用方法
 

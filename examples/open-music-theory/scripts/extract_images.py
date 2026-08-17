@@ -187,148 +187,263 @@ def fetch_page(url):
         return None
 
 
+def _normalize_caption(text):
+    """清理 HTML 标签和实体，标准化 caption 文本。"""
+    text = re.sub(r'<[^>]+>', '', text)
+    text = text.replace('&nbsp;', ' ').replace('&#160;', ' ')
+    text = text.replace('&amp;', '&').replace('&quot;', '"').replace('&#039;', "'")
+    return text.strip()
+
+
 def extract_images_from_html(html):
-    """从 HTML 提取所有 figure 中的图片 + MuseScore iframe 嵌入的乐谱"""
+    """从 HTML 提取所有 figure 图片、非 figure 图片、MuseScore 乐谱。"""
     images = []
 
-    # 找 <figure> 标签
+    # 1. 找 <figure> 标签中的图片
     figures = re.findall(r'<figure[^>]*>(.*?)</figure>', html, re.DOTALL)
     for fig in figures:
         cap_match = re.search(r'<figcaption[^>]*>(.*?)</figcaption>', fig, re.DOTALL)
         caption = ''
         if cap_match:
-            caption = re.sub(r'<[^>]+>', '', cap_match.group(1)).strip()
+            caption = _normalize_caption(cap_match.group(1))
 
         img_match = re.search(r'<img[^>]+src="([^"]+)"', fig)
         if img_match:
             src = img_match.group(1)
             if 'logo' in src.lower() or 'cc-by' in src.lower() or 'buckram' in src:
                 continue
-            alt = re.search(r'alt="([^"]*)"', fig)
+            alt_m = re.search(r'alt="([^"]*)"', fig)
             images.append({
                 'src': src,
                 'caption': caption,
-                'alt': alt.group(1) if alt else ''
+                'alt': alt_m.group(1) if alt_m else ''
             })
 
-    # 处理不在 <figure> 内的 <img>（pressbooks 经常直接放 img）
-    # 找到所有 img，排除 logo/cover，通过上下文寻找 Example caption
+    # 2. 处理不在 <figure> 内的 <img>（pressbooks 经常直接用 <p><img></p>）
     handled_urls = set()
     for img in images:
-        handled_urls.add(img['src'])
+        handled_urls.add(img['src'].split('?')[0])  # 忽略 query string 差异
 
-    # 收集页面中所有 iframe（MuseScore / YouTube）
-    iframes = re.findall(r'<iframe[^>]+src="([^"]+)"[^>]*>', html)
-    for iframe_url in iframes:
-        if 'musescore.com' in iframe_url:
-            # MuseScore 交互式乐谱 → 尝试通过 web archive 获取静态 SVG
-            ms_img = _fetch_musescore_as_image(iframe_url, html)
-            if ms_img:
-                images.append(ms_img)
-                print(f"    [INFO] MuseScore 乐谱已转为静态图片")
-        # YouTube iframe 跳过（无静态图片）
+    # 找到所有未被 figure 包裹的 img
+    # 先移除所有 figure 块，避免重复匹配
+    html_no_figures = re.sub(r'<figure[^>]*>.*?</figure>', '', html, flags=re.DOTALL)
+    non_figure_imgs = re.finditer(r'<img[^>]+src="([^"]+)"[^>]*>', html_no_figures)
+    for m in non_figure_imgs:
+        src = m.group(1)
+        if 'logo' in src.lower() or 'cc-by' in src.lower() or 'buckram' in src:
+            continue
+        src_clean = src.split('?')[0]
+        if src_clean in handled_urls:
+            continue
+        handled_urls.add(src_clean)
 
-    return images
+        # 从 img 标签附近查找 caption（向前查找 example-caption-name）
+        pos = m.start()
+        ctx_before = html_no_figures[max(0, pos-800):pos]
+        ctx_after = html_no_figures[pos:pos+800]
+
+        caption = ''
+        # 优先在图片后面查找 example-caption-name
+        cap_m = re.search(r'class="example-caption-name"[^>]*>(Example[^<]*)', ctx_after)
+        if cap_m:
+            caption = _normalize_caption(cap_m.group(1))
+        else:
+            # 在图片前面查找
+            cap_m = re.search(r'class="example-caption-name"[^>]*>(Example[^<]*)', ctx_before)
+            if cap_m:
+                caption = _normalize_caption(cap_m.group(1))
+            else:
+                # 尝试在附近文本中找 Example N
+                ex_m = re.search(r'Example\s+(?:&nbsp;)?(\d+)[^<]{0,100}', ctx_before + ctx_after)
+                if ex_m:
+                    caption = _normalize_caption(ex_m.group(0))
+
+        alt_m = re.search(r'alt="([^"]*)"', m.group(0))
+        images.append({
+            'src': src,
+            'caption': caption,
+            'alt': alt_m.group(1) if alt_m else ''
+        })
+        print(f"    [INFO] 非 figure 图片: {caption[:60]}")
+
+    # 3. 收集 MuseScore iframe
+    # 同时收集无法转为静态图的媒体链接（MuseScore 截图失败 / YouTube）
+    media_links = []
+
+    musescore_iframes = re.findall(
+        r'<iframe[^>]+src="(https://musescore\.com/[^"]+)"[^>]*>', html
+    )
+    for iframe_url in musescore_iframes:
+        # 从 iframe URL 提取 score ID
+        score_m = re.search(r'/scores/(\d+)', iframe_url)
+        score_id = score_m.group(1) if score_m else ''
+
+        # 从 iframe 附近 HTML 查找 Example 编号和 caption
+        iframe_pos = html.find(iframe_url)
+        p_start = html.rfind('<p ', 0, iframe_pos)
+        if p_start == -1:
+            p_start = html.rfind('<p>', 0, iframe_pos)
+        if p_start == -1:
+            p_start = max(0, iframe_pos - 200)
+        ctx = html[p_start:p_start + 2000]
+
+        ex_m = re.search(
+            r'class="example-caption-name"[^>]*>(Example\s*(?:&nbsp;)?\d+\.?[^<]*)',
+            ctx
+        )
+        example_num = 0
+        caption_text = ''
+        if ex_m:
+            caption_text = _normalize_caption(ex_m.group(1))
+            num_m = re.search(r'Example\s+(\d+)', caption_text)
+            if num_m:
+                example_num = int(num_m.group(1))
+
+        # 生成用户可访问的页面 URL（去掉 /embed 后缀）
+        page_url = re.sub(r'/embed/?$', '', iframe_url)
+
+        # 占位，实际数据由 Playwright 填充
+        images.append({
+            'src': f'__MUSESCORE_{score_id}__',
+            'caption': caption_text or f'Example {example_num}. MuseScore score.',
+            'alt': f'MuseScore score {score_id}',
+            '_musescore_score_id': score_id,
+            '_musescore_example': example_num,
+            '_musescore_page_url': page_url,
+        })
+        # 同时记录为 mediaLink（即使截图成功也保留链接作为备选）
+        media_links.append({
+            'example': example_num,
+            'type': 'musescore',
+            'url': page_url,
+            'caption': caption_text or f'Example {example_num}. MuseScore score.',
+            'score_id': score_id,
+        })
+        print(f"    [INFO] MuseScore iframe: score={score_id} Example={example_num}")
+
+    # 4. 收集 YouTube iframe
+    youtube_iframes = re.findall(
+        r'<iframe[^>]+src="(https://www\.youtube\.com/embed/[^"]+)"[^>]*>', html
+    )
+    for iframe_url in youtube_iframes:
+        iframe_pos = html.find(iframe_url)
+        p_start = html.rfind('<p ', 0, iframe_pos)
+        if p_start == -1:
+            p_start = html.rfind('<p>', 0, iframe_pos)
+        if p_start == -1:
+            p_start = max(0, iframe_pos - 200)
+        ctx = html[p_start:p_start + 2000]
+
+        ex_m = re.search(
+            r'class="example-caption-name"[^>]*>(Example\s*(?:&nbsp;)?\d+\.?[^<]*)',
+            ctx
+        )
+        example_num = 0
+        caption_text = ''
+        if ex_m:
+            caption_text = _normalize_caption(ex_m.group(1))
+            num_m = re.search(r'Example\s+(\d+)', caption_text)
+            if num_m:
+                example_num = int(num_m.group(1))
+
+        # 转为可点击的 YouTube 观看链接
+        vid_m = re.search(r'/embed/([^?]+)', iframe_url)
+        watch_url = f'https://www.youtube.com/watch?v={vid_m.group(1)}' if vid_m else iframe_url
+
+        media_links.append({
+            'example': example_num,
+            'type': 'youtube',
+            'url': watch_url,
+            'caption': caption_text or f'Example {example_num}. YouTube video.',
+        })
+        print(f"    [INFO] YouTube iframe: Example={example_num} url={watch_url}")
+
+    return images, media_links
 
 
 def _fetch_musescore_as_image(iframe_url, html):
-    """尝试从 MuseScore iframe 获取乐谱的静态 PNG 图片。
-    
-    MuseScore 被 Cloudflare 保护，直接访问被 403。
-    策略：通过 web.archive.org 的缓存获取 SVG 乐谱，转换为 PNG。
+    """从 MuseScore iframe 获取乐谱的静态 PNG 图片。
+
+    策略：直接访问 musescore.com 的 embed 页面获取 score hash，
+    然后带浏览器级 HTTP headers（Sec-Fetch-*、Referer 等）下载 SVG，
+    用 cairosvg 转为 PNG。这些 headers 能通过 Cloudflare 的图片资源校验。
     失败时返回 None。
     """
-    import subprocess, tempfile, gzip as gzip_mod
-    
+    import subprocess
+
     # 从 iframe URL 提取 score ID
-    # 格式: https://musescore.com/user/XXX/scores/YYY/embed 或 .../scores/YYY/s/CODE/embed
     score_m = re.search(r'/scores/(\d+)', iframe_url)
     if not score_m:
         return None
     score_id = score_m.group(1)
-    
-    # 先通过 web archive 获取 embed HTML，从中提取 score hash
+
+    UA = ('Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 '
+          '(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36')
+    embed_url = f'https://musescore.com/user/32728834/scores/{score_id}/embed'
+
     try:
-        embed_url = f'https://web.archive.org/web/2024/https://musescore.com/user/32728834/scores/{score_id}/embed'
-        result = subprocess.run(['curl', '-sL', '--max-time', '20', embed_url],
-                                capture_output=True, timeout=25)
-        embed_html = result.stdout.decode('utf-8', errors='replace')
-        
-        # 从 embed HTML 中提取 score hash (image_path)
+        # Step 1: 获取 embed HTML，提取 score hash
+        r1 = subprocess.run([
+            'curl', '-sL', '--http2', '--max-time', '20',
+            '-H', f'User-Agent: {UA}',
+            '-H', 'Accept: text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+            '-H', 'Accept-Language: en-US,en;q=0.9',
+            '-H', 'Sec-Fetch-Dest: iframe',
+            '-H', 'Sec-Fetch-Mode: navigate',
+            '-H', 'Sec-Fetch-Site: cross-site',
+            embed_url,
+        ], capture_output=True, timeout=25)
+        embed_html = r1.stdout.decode('utf-8', errors='replace')
+
         hash_m = re.search(r'scoredata/g/([a-f0-9]+)/', embed_html)
         if not hash_m:
+            print(f'    [WARN] MuseScore {score_id}: hash not found in embed page')
             return None
         score_hash = hash_m.group(1)
-        
-        svg_url = f'https://musescore.com/static/musescore/scoredata/g/{score_hash}/score_0.svg'
-        
-        # 尝试从 web archive 下载 SVG（尝试多个年份）
-        svg_data = None
-        for year in ['2025', '2024', '2023', '2022']:
-            archive_url = f'https://web.archive.org/web/{year}id_/{svg_url}'
-            r = subprocess.run(['curl', '-sL', '--max-time', '20', archive_url],
-                               capture_output=True, timeout=25)
-            if r.returncode == 0 and len(r.stdout) > 500:
-                # Check if it's SVG (not HTML)
-                if b'<svg' in r.stdout[:200]:
-                    svg_data = r.stdout
-                    break
-                # Might be gzip compressed
-                try:
-                    decompressed = gzip_mod.decompress(r.stdout)
-                    if b'<svg' in decompressed[:200]:
-                        svg_data = decompressed
-                        break
-                except:
-                    pass
-        
-        if not svg_data:
-            # Trigger a fresh save
-            subprocess.run(['curl', '-sL', '--max-time', '60',
-                           f'https://web.archive.org/save/{svg_url}'],
-                          capture_output=True, timeout=65)
-            import time
-            time.sleep(15)
-            r = subprocess.run(['curl', '-sL', '--max-time', '20',
-                               f'https://web.archive.org/web/2025id_/{svg_url}'],
-                              capture_output=True, timeout=25)
-            if r.returncode == 0 and len(r.stdout) > 500:
-                if b'<svg' in r.stdout[:200]:
-                    svg_data = r.stdout
-                else:
-                    try:
-                        svg_data = gzip_mod.decompress(r.stdout)
-                    except:
-                        pass
-        
+
+        # Step 2: 下载 SVG（带图片请求 headers 通过 Cloudflare）
+        svg_url = (f'https://musescore.com/static/musescore/scoredata/g/'
+                   f'{score_hash}/score_0.svg')
+        r2 = subprocess.run([
+            'curl', '-sL', '--http2', '--max-time', '20',
+            '-H', f'User-Agent: {UA}',
+            '-H', 'Accept: image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8',
+            '-H', 'Accept-Language: en-US,en;q=0.9',
+            '-H', 'Sec-Fetch-Dest: image',
+            '-H', 'Sec-Fetch-Mode: no-cors',
+            '-H', 'Sec-Fetch-Site: same-origin',
+            '-H', f'Referer: {embed_url}',
+            svg_url,
+        ], capture_output=True, timeout=25)
+
+        svg_data = r2.stdout
         if not svg_data or b'<svg' not in svg_data[:500]:
+            print(f'    [WARN] MuseScore {score_id}: SVG download failed '
+                  f'(size={len(svg_data)})')
             return None
-        
-        # Convert SVG to PNG using cairosvg
+
+        # Step 3: SVG → PNG
         try:
             import cairosvg
-            import io
             png_data = cairosvg.svg2png(bytestring=svg_data, output_width=1024)
         except ImportError:
-            # Fallback: return SVG directly (weasyprint supports SVG in <img>)
             import base64
             b64 = base64.b64encode(svg_data).decode('ascii')
             return {
                 'src': f'data:image/svg+xml;base64,{b64}',
-                'caption': f'MuseScore score (ID {score_id})',
+                'caption': f'Example (MuseScore {score_id})',
                 'alt': f'MuseScore score {score_id}',
             }
-        
-        # Find caption from surrounding HTML
-        # Look for Example N text near the iframe
+
+        # 从 HTML 上下文找 caption
         iframe_m = re.search(re.escape(iframe_url), html)
         caption = f'Example (MuseScore {score_id})'
         if iframe_m:
-            ctx = html[max(0,iframe_m.start()-500):iframe_m.end()+500]
+            ctx = html[max(0, iframe_m.start() - 500):iframe_m.end() + 500]
             ex_m = re.search(r'Example\s*(?:&nbsp;)?(\d+)[^<]*', ctx)
             if ex_m:
                 caption = f'Example {ex_m.group(1)}. MuseScore score.'
-        
+
         import base64
         b64 = base64.b64encode(png_data).decode('ascii')
         return {
@@ -337,7 +452,7 @@ def _fetch_musescore_as_image(iframe_url, html):
             'alt': caption,
         }
     except Exception as e:
-        print(f"    [WARN] MuseScore 处理失败: {e}")
+        print(f'    [WARN] MuseScore {score_id}: {e}')
         return None
 
 
@@ -419,6 +534,32 @@ def download_image(url):
     return f'data:{mime};base64,{b64}'
 
 
+def _capture_musescore_via_playwright(url):
+    """通过 Playwright 加载 pressbooks 页面，捕获所有 MuseScore 乐谱并转 PNG。
+    
+    返回 dict: {score_id: {example, png_base64, caption}}
+    """
+    sys.path.insert(0, str(Path(__file__).parent))
+    try:
+        from capture_musescore import capture_musescore_for_url
+    except ImportError as e:
+        print(f"    [WARN] capture_musescore module not available: {e}")
+        return {}
+    
+    results = capture_musescore_for_url(url, headless=True)
+    out = {}
+    for r in results:
+        # png_base64 already includes data URI prefix
+        b64_data = r['png_base64'].split(',', 1)[1] if ',' in r['png_base64'] else r['png_base64']
+        out[r['score_id']] = {
+            'example': r['example'],
+            'png_base64': b64_data,
+            'caption': r['caption'],
+        }
+        print(f"    [INFO] MuseScore score {r['score_id']} (Example {r['example']}): captured as PNG")
+    return out
+
+
 def process_card(item, force=False):
     """处理一张卡片"""
     cid = item['id']
@@ -428,38 +569,63 @@ def process_card(item, force=False):
         print(f"  [SKIP] {cid}: 已有 {len(item['images'])} 张图片")
         return item
 
-    url = get_chapter_url(item)
-    if not url:
+    page_url = get_chapter_url(item)
+    if not page_url:
         print(f"  [SKIP] {cid}: 找不到章节 URL")
         return item
 
-    print(f"  [FETCH] {cid}: {url}")
-    html = fetch_page(url)
+    print(f"  [FETCH] {cid}: {page_url}")
+    html = fetch_page(page_url)
     if not html:
         print(f"  [FAIL] {cid}: 页面抓取失败")
         return item
 
-    imgs = extract_images_from_html(html)
-    if not imgs:
-        print(f"  [INFO] {cid}: 未找到图片")
+    imgs, media_links = extract_images_from_html(html)
+    if not imgs and not media_links:
+        print(f"  [INFO] {cid}: 未找到图片或媒体链接")
         item['images'] = []
+        item['mediaLinks'] = []
         return item
 
-    print(f"  [INFO] {cid}: 找到 {len(imgs)} 张图片")
+    # 检查是否有 MuseScore iframe 需要抓取
+    has_musescore = any(img.get('_musescore_score_id') for img in imgs)
+    if has_musescore:
+        print(f"  [MUSESCORE] 检测到 MuseScore 乐谱，使用 curl 直接抓取 SVG→PNG...")
 
+    print(f"  [INFO] {cid}: 找到 {len(imgs)} 个图片元素, {len(media_links)} 个媒体链接")
+
+    # 记录截图成功的 score_id，用于从 mediaLinks 中标记
+    captured_scores = set()
     image_data = []
     for i, img_info in enumerate(imgs):
+        # 处理 MuseScore 乐谱（通过 curl 直接抓取 SVG 并转 PNG）
+        if img_info.get('_musescore_score_id'):
+            score_id = img_info['_musescore_score_id']
+            iframe_url = img_info.get('_musescore_page_url', page_url)
+            result = _fetch_musescore_as_image(iframe_url, html)
+            if result:
+                captured_scores.add(score_id)
+                image_data.append({
+                    'src': result['src'],
+                    'caption': img_info.get('caption') or result.get('caption', ''),
+                    'alt': result.get('alt', ''),
+                })
+                print(f"    [{i+1}/{len(imgs)}] MuseScore {score_id}: OK (SVG→PNG)")
+            else:
+                print(f"    [{i+1}/{len(imgs)}] MuseScore {score_id}: FAIL (将使用链接)")
+            continue
+
         src = img_info['src']
         if not src.startswith('http'):
-            src = urljoin(url, src)
+            src = urljoin(page_url, src)
 
         print(f"    [{i+1}/{len(imgs)}] {src[:70]}...", end=' ')
         data_url = download_image(src)
         if data_url:
             image_data.append({
                 'src': data_url,
-                'caption': img_info['caption'],
-                'alt': img_info['alt']
+                'caption': img_info.get('caption', ''),
+                'alt': img_info.get('alt', '')
             })
             print("OK")
         else:
@@ -467,8 +633,16 @@ def process_card(item, force=False):
 
         time.sleep(0.3)
 
+    # 更新 mediaLinks：截图成功的 MuseScore 标记 captured=True
+    for ml in media_links:
+        if ml.get('type') == 'musescore' and ml.get('score_id') in captured_scores:
+            ml['captured'] = True
+        else:
+            ml['captured'] = False
+
     item['images'] = image_data
-    print(f"  [OK] {cid}: 成功获取 {len(image_data)}/{len(imgs)} 张图片")
+    item['mediaLinks'] = media_links
+    print(f"  [OK] {cid}: 成功获取 {len(image_data)} 张图片, {len(media_links)} 个媒体链接")
     return item
 
 

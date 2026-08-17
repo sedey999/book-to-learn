@@ -43,6 +43,67 @@ metadata:
 4. **翻译实时完成**：术语核对必须联网查询权威译法，不得凭记忆；翻译在每次推送时现做。
 5. **PDF 文件名必须含当天日期**，统一格式 `OMT_YYYY-MM-DD_<card_id>.pdf`。
 
+## 🚀 首次使用引导（必须在首次推送前完成）
+
+当首次使用本 skill 时，**必须先向用户说明本 skill 的功能，并收集以下配置信息**：
+
+### 向用户说明的内容
+
+> 🎵 **omt-daily-push** 将《Open Music Theory》开源乐理教材拆解为 **118 个知识点卡片**，每次调用自动完成：
+>
+> 1. 获取下一张未推送的卡片
+> 2. 联网核对每个音乐术语的权威中文译法
+> 3. AI 实时翻译（核心观点、详解、金句、应用场景）
+> 4. 生成精美的中英双语对照 PDF（含教材原文乐谱图片）
+> 5. 图片完整性自动复核
+> 6. 上传 PDF 及相关附件到你的 IMA 知识库
+> 7. 记录进度（失败不计入，下次自动重推）
+>
+> 需要你提供两项信息即可开始：
+
+### 需要向用户收集的信息
+
+| # | 信息 | 是否必填 | 说明 |
+|---|------|---------|------|
+| 1 | **IMA 知识库名称** | ✅ 必填 | 你在 IMA 中创建的知识库名称，例如「我的乐理笔记」 |
+| 2 | **目标文件夹名称** | ✅ 必填 | 知识库内存放每日卡片的文件夹，默认「每日一个知识点」 |
+| 3 | **推送失败 Webhook URL** | ❌ 可选 | 飞书/Slack/企业微信机器人 webhook，凭证失效或附件失败时通知你。不提供则仅在日志中提示 |
+
+### 自动配置
+
+收集信息后，运行引导脚本自动生成配置：
+
+```bash
+cd <skill_dir>
+python3 scripts/setup.py
+```
+
+脚本会：
+- 展示本 skill 功能说明
+- 检查 IMA 凭证、ima-skill、Python 依赖是否就绪
+- 交互式收集知识库名称、文件夹名称、webhook URL
+- 生成 `config.json`
+
+也可以通过参数非交互配置：
+
+```bash
+python3 scripts/setup.py --non-interactive \
+  --kb-name "你的知识库名称" \
+  --folder-name "每日一个知识点" \
+  --webhook "https://open.feishu.cn/open-apis/bot/v2/hook/xxx"
+```
+
+### 前置条件检查清单
+
+首次运行前确认以下条件：
+- [ ] IMA API 凭证已配置（`~/.config/ima/client_id` 和 `api_key`）
+- [ ] ima-skill 已安装
+- [ ] Python 依赖已安装（`pip install -r requirements.txt`）
+- [ ] `config.json` 已通过 setup.py 生成
+- [ ] 目标知识库和文件夹已在 IMA 中创建
+
+运行 `python3 scripts/push_card.py status` 验证安装。
+
 ## 安装（首次使用前）
 
 ### 1. 必备依赖
@@ -182,13 +243,13 @@ cd $SD && python3 scripts/extract_images.py                    # 批量全部
 
 ### Step 2：联网核对术语中文译法
 
-对 `terminology` 数组中每个英文术语，使用 **web search 工具**（agent 内置的联网搜索能力，如 `web_search` 工具）查询其在**音乐理论领域**的权威中文译法。检索词示例：
+对 `terminology` 数组中每个英文术语，使用 agent 的联网搜索能力查询其在**音乐理论领域**的权威中文译法。
+
+可使用任何可用的 web search 工具（如 agent 内置 web_search、searxng、Brave Search、Perplexity 等）。检索词示例：
 
 - `music theory <term> 中文 译名`
 - `<term> 乐理 术语`
 - `<term> music theory translation Chinese`
-
-> **搜索工具选择**：直接使用 agent 内置的 web search 工具即可，不依赖任何特定搜索 skill（如 searxng/byted），保持跨平台通用性。
 
 汇总为 `terminologyZh` 对象 `{"英文术语": "中文译法"}`。**必须核对，不可凭记忆。**
 
@@ -327,20 +388,38 @@ preflight 检查 → 重名检查 → create_media → COS 上传 → add_knowle
 
 #### 7b. 上传相关附件
 
-主 PDF 上传成功后，检查 payload 的 `relatedLinks` 数组中真正的文件类型链接：
+主 PDF 上传成功后，调用自动处理脚本下载并处理所有文件附件：
 
+```bash
+cd $SD && python3 scripts/process_attachments.py \
+  --payload /tmp/omt_payload.json \
+  --date <YYYY-MM-DD 推送日期> \
+  --card-id <nextId> \
+  --out-dir /tmp/omt_attachments
+```
+
+脚本自动完成以下工作：
+1. **识别文件链接**：自动筛选 `relatedLinks` 中以 `.pdf/.docx/.xlsx/.doc/.pptx/.png/.jpg/.jpeg/.gif/.webp` 结尾的真实文件链接，跳过网页链接
+2. **去重检查**：自动跳过已在 `payload.images` 中作为 base64 内嵌到 PDF 的图片，避免重复上传
+3. **下载文件**：带浏览器 User-Agent/Accept/Referer 下载，自动识别并跳过 403/404 错误页
+4. **PNG 自动转 JPG**：所有下载的 PNG 文件自动转换为高质量 JPG（quality=95），透明背景填充白色，转换后删除原 PNG
+5. **统一命名**：按 `OMT_YYYY-MM-DD_<card_id>_<原文件名（扩展名已更新为jpg）>` 格式重命名
+
+脚本运行完成后，读取 `/tmp/omt_attachments/attachments.json` 获取处理结果，对 `processed` 数组中的每个文件执行上传：
+```bash
+cd $SD && python3 scripts/upload_ima.py --file "<local_path>"
+```
+
+上传完成后在 daily-progress.md 中标注附件数量和文件名，注明哪些是 PNG 转换而来。
+
+**附件上传失败**：不影响主推送进度，但必须通过 `scripts/notify_attachment_failed.py` 通知（webhook URL 从 config.json 读取）。
+
+手动处理方式（不推荐，仅作参考）：
 1. **遍历 relatedLinks**，识别 href 以以下文件扩展名**结尾**的链接：`.pdf` / `.docx` / `.xlsx` / `.doc` / `.pptx`
    - ⚠️ **只匹配上述后缀**，不要匹配网页链接（如 `.com/`、`.html`、无后缀的 URL 等）
-   - ⚠️ 不要将 `hellomusictheory.com/learn/duplets/` 这样的网页链接误识别为文件
 2. **下载附件**：使用 `curl -sL -A "Mozilla/5.0"` 下载（带 User-Agent，避免 403）
 3. **验证文件类型**：下载后执行 `file <路径>` 检查是否为真正的 PDF/DOCX/XLSX 等格式
-   - 如果是 `HTML document`（即被重定向到网页），说明链接失效或不是文件，**跳过并记录**
-4. **重命名**：统一格式为 `OMT_YYYY-MM-DD_<card_id>_<原文件名>`
-   - 例：`OMT_2026-07-04_ch01-01_WK-Introduction-to-Western-Musical-Notation.pdf`
-5. **逐个上传**：对每个真正的文件附件执行 `python3 scripts/upload_ima.py --file <附件路径>`
-6. **记录**：在 daily-progress.md 中标注附件数量和文件名
-
-附件上传失败不影响主推送进度，仅记录失败信息。
+4. **重命名并上传**：统一格式为 `OMT_YYYY-MM-DD_<card_id>_<原文件名>`，逐个上传
 
 ### Step 8：记录推送进度（仅主 PDF 上传成功后）
 
@@ -386,10 +465,14 @@ cd $SD && python3 scripts/push_card.py mark <nextId> success
 | `scripts/push_card.py` | 进度管理 + 卡片载荷提取（status/next/render/mark/weekday） |
 | `scripts/gen_card_pdf.py` | 生成卡片式双语 PDF（weasyprint） |
 | `scripts/upload_ima.py` | 上传 PDF/附件到 IMA 知识库文件夹（含密钥失效检测、动态 ima-skill 路径查找） |
-| `scripts/notify_key_expired.py` | 密钥失效通知（stderr + 可选 $IMA_KEY_EXPIRED_WEBHOOK） |
-| `scripts/extract_images.py` | 从 pressbooks 抓取 Example 图片并缓存到 items.json（支持 WordPress 原图获取 + MuseScore iframe 通过 web archive 缓存获取） |
+| `scripts/notify_key_expired.py` | 密钥失效通知（stderr + webhook 从 config.json 或 $IMA_KEY_EXPIRED_WEBHOOK 读取） |
+| `scripts/extract_images.py` | 从 pressbooks 抓取 Example 图片并缓存到 items.json（支持 WordPress 原图 + MuseScore iframe 乐谱转静态图） |
 | `scripts/review_pdf_images.py` | **PDF 生成后强制复核**：用 PyMuPDF 检查图片顺序/完整性/位置，未通过则阻止上传 |
 | `scripts/card_slug_map.py` | 卡片 ID → pressbooks 章节精确映射表 |
+| `scripts/process_attachments.py` | 自动下载/转换/重命名 relatedLinks 中的文件附件（PNG→JPG） |
+| `scripts/notify_attachment_failed.py` | 附件下载/上传失败时发送 webhook 通知 |
+| `config.json` | 本地配置：知识库名称、文件夹、webhook URL（不提交到公开仓库） |
+| `scripts/setup.py` | 首次使用引导脚本（交互式检查环境 + 生成 config.json） |
 | `cards/`（可选）| 118 张纯英文 HTML 卡片源，若存在则优先使用；不存在则直接读取 items.json |
 
 ## 定时任务配置
