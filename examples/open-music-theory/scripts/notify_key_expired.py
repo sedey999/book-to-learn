@@ -61,7 +61,17 @@ def main():
     # Always notify via stderr so the caller (agent/CI log) sees it.
     print(text, file=sys.stderr)
 
+    # Webhook URL: env var first, then config.json in skill root
     webhook = os.environ.get("IMA_KEY_EXPIRED_WEBHOOK", "").strip()
+    if not webhook:
+        _skill_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        _cfg_path = os.path.join(_skill_root, 'config.json')
+        if os.path.isfile(_cfg_path):
+            try:
+                _cfg = json.load(open(_cfg_path, encoding='utf-8'))
+                webhook = (_cfg.get('keyExpiredWebhook') or '').strip()
+            except Exception:
+                pass
     webhook_status = {"webhook_configured": bool(webhook)}
     if webhook:
         ok, info = send_webhook(webhook, text)

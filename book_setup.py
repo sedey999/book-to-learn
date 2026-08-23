@@ -74,9 +74,18 @@ def cmd_init(args):
     print(json.dumps({'ok': True, 'config': cfg_path, 'config_content': config}, ensure_ascii=False, indent=2))
 
 def cmd_gen_cards(args):
-    """Generate cards/*.html from items.json (English source cards with translation-panel)."""
+    """Generate cards/*.html from items.json (preview-only; items.json is the
+    single source of truth for push payloads)."""
     bd = book_dir(args.slug)
     items = json.load(open(os.path.join(bd, 'items.json'), encoding='utf-8'))
+    ids = [it.get('id') for it in items]
+    dups = sorted({i for i in ids if ids.count(i) > 1})
+    if dups:
+        print(json.dumps({'ok': False, 'error': 'duplicate ids in items.json (cards would overwrite each other): %s' % ', '.join(map(str, dups))}, ensure_ascii=False))
+        sys.exit(1)
+    if any(not i for i in ids):
+        print(json.dumps({'ok': False, 'error': 'every item needs a non-empty id'}, ensure_ascii=False))
+        sys.exit(1)
     cards_dir = os.path.join(bd, 'cards')
     os.makedirs(cards_dir, exist_ok=True)
     # clear old cards
@@ -167,6 +176,11 @@ def cmd_gen_index(args):
     """Generate index.json from items.json."""
     bd = book_dir(args.slug)
     items = json.load(open(os.path.join(bd, 'items.json'), encoding='utf-8'))
+    ids = [it.get('id') for it in items]
+    dups = sorted({i for i in ids if ids.count(i) > 1})
+    if dups:
+        print(json.dumps({'ok': False, 'error': 'duplicate ids in items.json: %s' % ', '.join(map(str, dups))}, ensure_ascii=False))
+        sys.exit(1)
     config = json.load(open(os.path.join(bd, 'config.json'), encoding='utf-8'))
     index = {
         'bookTitle': config.get('bookTitle', args.slug),
@@ -201,23 +215,32 @@ def cmd_download_imgs(args):
     os.makedirs(img_dir, exist_ok=True)
     UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36'
     url_map = {}
+    failed = []   # urls we could not fetch after retries
     for it in items:
         u = it.get('image', '')
-        if u and not u.startswith('data:') and u not in url_map:
+        if u and not u.startswith('data:') and u not in url_map and u not in failed:
             ext = u.rsplit('.', 1)[-1].split('?')[0].split('-')[0].lower()
             if ext not in ('png','jpg','jpeg','gif','webp','svg'): ext = 'png'
             if ext == 'jpeg': ext = 'jpg'
             h = hashlib.md5(u.encode()).hexdigest()[:10]
             fn = f'img_{h}.{ext}'
             out = os.path.join(img_dir, fn)
+            ok = False
             for attempt in range(3):
-                r = subprocess.run(['curl','-sL','--insecure','--max-time','30','-A',UA,'-o',out,u], capture_output=True)
-                if os.path.exists(out) and os.path.getsize(out) > 500:
+                # NOTE: no --insecure (TLS is verified); original PDFs may still
+                # fail on self-signed hosts, which will be reported in `failed`.
+                r = subprocess.run(['curl','-sL','--fail','--max-time','30','-A',UA,'-o',out,u], capture_output=True)
+                if r.returncode == 0 and os.path.exists(out) and os.path.getsize(out) > 500:
                     head = open(out,'rb').read(8)
                     if head[:4]==b'\x89PNG' or head[:3]==b'\xff\xd8\xff' or head[:4]==b'GIF8' or head[:4]==b'RIFF':
                         url_map[u] = fn
+                        ok = True
                         break
                 if os.path.exists(out) and os.path.getsize(out) <= 500:
+                    os.remove(out)
+            if not ok:
+                failed.append(u)
+                if os.path.exists(out):
                     os.remove(out)
     # build data URIs
     data_uris = {}
@@ -238,7 +261,15 @@ def cmd_download_imgs(args):
             updated += 1
     with open(os.path.join(bd, 'items.json'), 'w', encoding='utf-8') as f:
         json.dump(items, f, ensure_ascii=False, indent=2)
-    print(json.dumps({'ok': True, 'downloaded': len(url_map), 'embedded': updated, 'slug': args.slug}, ensure_ascii=False))
+    result = {'ok': True, 'downloaded': len(url_map), 'embedded': updated, 'slug': args.slug}
+    if failed:
+        result['failed'] = failed
+        result['warning'] = ('%d image(s) failed to download after 3 attempts and were left as remote URLs: %s'
+                             % (len(failed), '; '.join(failed[:10]) + (' ...' if len(failed) > 10 else '')))
+    print(json.dumps(result, ensure_ascii=False))
+    if failed:
+        # non-fatal, but loud: un-embedded images depend on the remote host at push time
+        print('WARNING: some images could not be embedded; they will stay as URLs (offline reading will break for those cards)', file=sys.stderr)
 
 def cmd_summary(args):
     """Print a detailed configuration summary for user confirmation."""
@@ -361,6 +392,8 @@ def cmd_prompt(args):
     sd = SKILL_DIR  # dynamic skill directory
     import tempfile
     tmp = tempfile.gettempdir()
+    prefix = config.get('cardPrefix', 'BOOK')
+    pdf_name = f"{tmp}/{prefix}_$(date +%F)_<nextId>_<topicZh>.pdf" if language == 'en' else f"{tmp}/{prefix}_$(date +%F)_<nextId>_<topic>.pdf"
     prompt = f"""执行 book-to-learn skill：推送《{config.get('bookTitle',slug)}》今日知识点卡片。
 书目录：{bd}
 skill目录：{sd}
@@ -369,10 +402,11 @@ skill目录：{sd}
 
 严格按以下步骤执行：
 
-1. cd {sd} && python3 push_card.py next --book {slug} --force > {tmp}/b2l_payload.json
-   解析输出。若 skip=true（all_done/weekend/already_pushed），告知并结束。
+1. cd {sd} && python3 push_card.py next --book {slug} > {tmp}/b2l_payload.json
+   解析输出。若 skip=true（all_done/weekend/already_pushed/push_in_progress），告知并结束。报错时告知用户并结束。
+   成功后记下 nextId。生成文件名时中文名需去除文件名非法字符。
 
-2. 从载荷提取 nextId、terminology、coreIdea、explanation、quote、application、relatedLinks。"""
+2. 从载荷提取 nextId、terminology、coreIdea、explanation、quote、application、relatedLinks（完整原文以 items.json 为准）。"""
     if language == 'en':
         prompt += f"""
 3. 【仅英文书】对 terminology 数组每个术语，使用当前环境中可用的联网搜索工具（WebSearch / SearXNG / 其他搜索 skill）查询其在专业领域的权威中文译法，汇总为 terminologyZh。必须联网核对，不可凭记忆。若环境无搜索工具，告知用户需配置搜索能力。
@@ -383,12 +417,13 @@ skill目录：{sd}
 3. 【中文书】跳过翻译环节，无需写翻译 JSON。"""
     prompt += f"""
 {6 if language=='en' else 4}. 生成卡片式 PDF（文件名末尾带知识点中文名）：
-   cd {sd} && python3 gen_card_pdf.py --payload {tmp}/b2l_payload.json {"--zh "+tmp+"/b2l_zh.json" if language=='en' else ""} --out "{tmp}/{config.get('cardPrefix','BOOK')}_$(date +%F)_<nextId>_<{('topicZh' if language=='en' else 'topic')}>.pdf" --language {language}
+   cd {sd} && python3 gen_card_pdf.py --payload {tmp}/b2l_payload.json {"--zh "+tmp+"/b2l_zh.json" if language=='en' else ""} --out "{pdf_name}" --language {language}
+   生成后记下实际 PDF 路径（即本行 --out 的值，替换占位符后）为 $PDF_PATH，后续步骤直接使用 $PDF_PATH，不得另行拼文件名。
 
 {7 if language=='en' else 5}. 推送：
 """
     if push_method == 'ima':
-        prompt += f"""   cd {sd} && python3 upload_ima.py --file "{tmp}/{config.get('cardPrefix','BOOK')}_<date>_<nextId>.pdf" --config {bd}/config.json --book-dir {bd}
+        prompt += f"""   cd {sd} && python3 upload_ima.py --file "$PDF_PATH" --config {bd}/config.json --book-dir {bd}
    退出码 0=成功继续下一步；2=密钥失效（已发通知）不计进度结束；1=其他错误不更新进度结束。"""
     else:
         prompt += f"""   cd {sd} && python3 send_feishu.py --payload {tmp}/b2l_payload.json {"--zh "+tmp+"/b2l_zh.json" if language=='en' else ""} --config {bd}/config.json --language {language}
@@ -397,8 +432,14 @@ skill目录：{sd}
 {8 if language=='en' else 6}. 仅成功后记录进度（两步）：
    cd {sd} && python3 push_card.py mark --book {slug} <nextId> success
    cd {sd} && python3 book_setup.py log-progress {slug} --card-id <nextId>
+   若任一步失败：cd {sd} && python3 push_card.py mark --book {slug} <nextId> fail
 
-{9 if language=='en' else 7}. 汇报：今日推送第 X/N 张、主题、{"术语核对要点、" if language=='en' else ""}已推送至{"IMA知识库" if push_method=='ima' else "飞书"}、进度已记录至 daily-progress.md。"""
+{9 if language=='en' else 7}. 【仅 IMA】处理 relatedLinks 中的文件附件（可选增强）：
+   cd {sd} && python3 process_attachments.py --payload {tmp}/b2l_payload.json --date $(date +%F) --card-id <nextId> --out-dir {tmp}/b2l_attachments
+   读取 {tmp}/b2l_attachments/attachments.json，对 processed 数组逐个：python3 upload_ima.py --file <local_path> --config {bd}/config.json --book-dir {bd}
+   附件上传失败不影响主进度，但需在汇报中说明。
+
+{10 if language=='en' else 8}. 汇报：今日推送第 X/N 张、主题、{"术语核对要点、" if language=='en' else ""}附件情况、已推送至{"IMA知识库" if push_method=='ima' else "飞书"}、进度已记录至 daily-progress.md。"""
     print(prompt)
 
 def main():

@@ -14,9 +14,32 @@ import os, sys, re, subprocess, html, argparse
 class ExtractionError(Exception):
     pass
 
+def warn(msg):
+    """Degraded-extraction warnings go to stderr so stdout stays clean for JSON."""
+    print('[extract_text][WARN] ' + msg, file=sys.stderr)
+
 # ── PDF ──
 def extract_pdf(path):
     """PDF: pdftotext → pypdf → pdfminer.six"""
+    # 0. quick scan: warn early on likely scanned (image-only) PDFs
+    try:
+        from pypdf import PdfReader as _R
+        _r = _R(path)
+        _npages = len(_r.pages)
+        if _npages > 5:
+            _t = ''
+            try:
+                _t = (_r.pages[0].extract_text() or '') + (_r.pages[min(4, _npages - 1)].extract_text() or '')
+            except Exception:
+                pass
+            if len(_t.strip()) < 50:
+                warn('PDF pages contain almost no extractable text; this looks like a SCANNED PDF. '
+                     'Run OCR (e.g. ocrmypdf) before extracting, or the result will be garbage.')
+    except Exception:
+        pass
+    # NOTE: pdftotext -layout preserves PHYSICAL columns; two-column academic
+    # layouts come out with left/right columns interleaved per line. If chapter
+    # structure looks scrambled downstream, try re-extracting without -layout.
     # 1. pdftotext (poppler) — fastest, best for text-heavy PDFs
     try:
         r = subprocess.run(['pdftotext', '-layout', path, '-'],
@@ -142,7 +165,7 @@ def extract_epub(path):
             return text
     except Exception:
         pass
-    # fallback: stdlib zipfile
+    # fallback: stdlib zipfile (DEGRADED: paragraph structure is lost)
     try:
         import zipfile, html as html_mod
         parts = []
@@ -158,6 +181,7 @@ def extract_epub(path):
                             parts.append(text)
         text = '\n\n'.join(parts)
         if text.strip():
+            warn('EPUB fell back to stdlib extractor: paragraph structure lost, chapter splitting may degrade. Install ebooklib + beautifulsoup4 and re-extract.')
             return text
     except Exception:
         pass
@@ -187,7 +211,7 @@ def extract_rtf(path):
             return text
     except ImportError:
         pass
-    # regex fallback: strip RTF control words
+    # regex fallback: strip RTF control words (DEGRADED)
     try:
         with open(path, 'r', encoding='utf-8', errors='ignore') as f:
             raw = f.read()
@@ -197,6 +221,7 @@ def extract_rtf(path):
         text = html.unescape(text)
         text = re.sub(r'\s+', ' ', text).strip()
         if text:
+            warn('RTF fell back to regex stripper: output may be noisy. Install striprtf and re-extract.')
             return text
     except Exception:
         pass

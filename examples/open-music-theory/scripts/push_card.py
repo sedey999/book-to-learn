@@ -40,6 +40,7 @@ def today_str():
 
 def is_workday(d=None):
     d = d or datetime.date.today()
+    # Default: weekdays only. Set to `return True` to push every day (incl. weekends).
     return d.weekday() < 5  # Mon=0..Fri=4
 
 
@@ -96,6 +97,22 @@ def extract_text_from_html(htmlstr):
     m = re.search(r'<div class="topic">(.*?)</div>', htmlstr, flags=re.S)
     out['topic'] = normalize_quotes(html.unescape(re.sub(r'<[^>]+>', '', m.group(1))).strip()) if m else ''
     return out
+
+
+def _build_source(item, index, card_id):
+    """Build source URL: prefer item.link, then chapter-specific URL from card_slug_map, then book source."""
+    link = item.get('link', '')
+    if link:
+        return link
+    # Try to build chapter-specific URL from CARD_SLUG_MAP
+    try:
+        from card_slug_map import CARD_SLUG_MAP
+        slug = CARD_SLUG_MAP.get(card_id)
+        if slug:
+            return 'https://viva.pressbooks.pub/openmusictheory/chapter/%s/' % slug
+    except ImportError:
+        pass
+    return index.get('bookSource', '')
 
 
 def cmd_status(args):
@@ -164,7 +181,7 @@ def cmd_next(args):
         'images': item.get('images', []),
         'relatedLinks': item.get('relatedLinks', []),
         'terminology': item.get('terminology', []),
-        'source': item.get('link', '') or index.get('bookSource', ''),
+        'source': _build_source(item, index, card_id),
         'date': today_str(),
     }
     print(json.dumps(payload, ensure_ascii=False, indent=2))

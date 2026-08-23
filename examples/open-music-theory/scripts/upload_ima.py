@@ -51,7 +51,7 @@ def load_target_config():
             folder_name = folder_name or cfg.get('folderName', '').strip()
         except Exception:
             pass
-    kb_name = kb_name or '【权威】音乐制作：风格与流派'
+    kb_name = kb_name or '我的乐理笔记'
     folder_name = folder_name or '每日一个知识点'
     return kb_name, folder_name
 

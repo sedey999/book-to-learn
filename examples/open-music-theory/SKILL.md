@@ -180,11 +180,11 @@ export IMA_OPENAPI_APIKEY="***"
 编辑 `push_card.py` 同目录下的 `config.json`（首次运行会自动生成模板），或通过环境变量传入：
 
 ```bash
-export OMT_KB_NAME="【权威】音乐制作：风格与流派"   # 你在 IMA 中的知识库名称
+export OMT_KB_NAME="我的乐理笔记"                   # 你在 IMA 中的知识库名称（示例）
 export OMT_FOLDER_NAME="每日一个知识点"              # 知识库内的目标文件夹
 ```
 
-未配置时，默认使用上述示例名称（你也可以在 IMA 中创建同名知识库/文件夹，或修改 `upload_ima.py` 顶部的 `DEFAULT_KB_NAME` / `DEFAULT_FOLDER_NAME`）。
+未配置时使用 `upload_ima.py` 中的默认示例名称。建议在 IMA 中创建自己的知识库/文件夹后按上述方式配置。
 
 ### 5. （可选）密钥失效 webhook 通知
 
@@ -209,7 +209,7 @@ export IMA_KEY_EXPIRED_WEBHOOK="https://open.feishu.cn/open-apis/bot/v2/hook/<yo
 ### Step 1：获取下一张卡片载荷
 
 ```bash
-cd $SD && python3 scripts/push_card.py next --force > /tmp/omt_payload.json
+cd $SD && python3 scripts/push_card.py next > /tmp/omt_payload.json
 ```
 
 解析输出 JSON。若含 `"skip": true`：
@@ -220,37 +220,47 @@ cd $SD && python3 scripts/push_card.py next --force > /tmp/omt_payload.json
 
 > **数据来源说明**：卡片英文内容直接来自 `items.json`（已内置 118 张卡片的全部字段），无需额外的 `cards/` HTML 目录。如果你的安装中存在 `cards/` 目录（可选，包含原始 HTML 卡片），脚本会优先使用 HTML；否则自动回退到 items.json。
 
-### Step 1b（可选）：提取卡片原文中的 Example 图片
+### Step 1b（必须）：自动补全卡片原文和 Example 图片
 
-如果希望 PDF 包含教材原文的 Example 图（且 `items.json` 中尚无 `images` 字段），运行抓取：
+> **⚠️ 此步骤为强制步骤，不可跳过。** items.json 中的 explanationEn 存在被截断在 6000 字符的历史问题，且 images 数组可能不完整。每次推送前必须运行以下命令，从官网补全当前卡片的完整文本和所有 Example 图片：
 
 ```bash
-cd $SD && python3 scripts/extract_images.py --card <nextId>   # 单张
-cd $SD && python3 scripts/extract_images.py                    # 批量全部
+cd $SD && python3 scripts/extract_images.py --card <nextId> --force
 ```
 
-这会从 pressbooks 页面抓取所有 figure 图片并缓存为 base64，批量模式输出到 `items_new.json`，确认无误后替换 `items.json`。
+此脚本会：
+1. 从 pressbooks 官网抓取该章节的完整 HTML
+2. 提取所有静态图片（`<img>` / `<figure>`）并转为 base64
+3. 自动通过 Wayback Machine 缓存获取 MuseScore 交互式乐谱的 SVG 并转为 PNG
+4. 输出到 `items_new.json`
 
-**⚠️ 图片类型说明：**
+**脚本执行完成后，必须检查输出：**
+- 如果 `items_new.json` 中该卡片的 explanationEn 比 items.json 更长，或 images 数量更多，则用 items_new.json 替换 items.json：
+  ```bash
+  cp items_new.json items.json
+  ```
+- 替换后**重新运行 Step 1a**（`push_card.py next --force`，此时需 --force 跳过当日已推判断以获取更新后的载荷）获取更新后的 payload
+- 如果脚本报告有 MuseScore 乐谱截图失败（`captured=false`），在 PDF 中以链接卡片形式呈现（与 ch01-14 处理方式相同），不要中止推送
+
+**图片类型说明：**
 
 教材中的 Example 有三种形式，`extract_images.py` 处理能力不同：
 
 1. **静态图片（`<img>` / `<figure>`）**：自动抓取为 base64 内嵌到 PDF。这是最常见的形式。WordPress 缩略图会自动升级为原图。
-2. **MuseScore 交互式乐谱（`<iframe>` 来自 musescore.com）**：浏览器中是可交互/播放的乐谱。`extract_images.py` 会自动通过 web archive 缓存获取 SVG 矢量乐谱并转为 PNG。
-3. **YouTube 视频嵌入（`<iframe>` 来自 youtube.com）**：没有静态图片，无法嵌入 PDF，会被跳过。
+2. **MuseScore 交互式乐谱（`<iframe>` 来自 musescore.com）**：浏览器中是可交互/播放的乐谱。`extract_images.py` 会自动通过 web archive 缓存获取 SVG 矢量乐谱并转为 PNG。若截图失败，以链接卡片形式呈现。
+3. **YouTube/Spotify 嵌入（`<iframe>`）**：没有静态图片，无法嵌入 PDF，会被跳过。
 
 **翻译时如何区分：** payload 中 `images` 数组里有对应 Example 编号的图片才能加 `__IMAGE_X__` 标记。如果原文提到 "Example X" 但 payload.images 中没有该编号，说明这是视频或交互内容，**不要加标记**。
 
 ### Step 2：联网核对术语中文译法
 
-对 `terminology` 数组中每个英文术语，使用 agent 的联网搜索能力查询其在**音乐理论领域**的权威中文译法。
+对 `terminology` 数组中每个英文术语，按以下优先级使用联网查询其在**音乐理论领域**的权威中文译法：
 
-可使用任何可用的 web search 工具（如 agent 内置 web_search、searxng、Brave Search、Perplexity 等）。检索词示例：
+1. **首选：searxng skill** — `~/.openclaw/workspace/skills/searxng/`
+2. **备选：byted-web-search skill** — `~/.openclaw/workspace/skills/byted-web-search/`
+3. **备选：agent 内置 web search 工具**
 
-- `music theory <term> 中文 译名`
-- `<term> 乐理 术语`
-- `<term> music theory translation Chinese`
-
+检索词示例：`music theory <term> 中文 译名` 或 `<term> 乐理 术语`。
 汇总为 `terminologyZh` 对象 `{"英文术语": "中文译法"}`。**必须核对，不可凭记忆。**
 
 ### Step 3：实时翻译

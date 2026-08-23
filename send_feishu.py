@@ -17,9 +17,11 @@ def load_config(path):
     return json.load(open(path, encoding='utf-8'))
 
 def esc_md(text):
-    """Escape special chars for Feishu markdown."""
+    """Escape special chars for Feishu markdown.
+    | would break markdown tables (terminology table), so escape it too."""
     if not text: return ''
-    return text.replace('\\', '\\\\').replace('*', '\\*').replace('_', '\\_').replace('[', '\\[')
+    return (text.replace('\\', '\\\\').replace('*', '\\*').replace('_', '\\_')
+                .replace('[', '\\[').replace('|', '\\|'))
 
 def md_links_to_feishu(text):
     """Convert markdown [text](url) to Feishu-compatible link text (url)."""

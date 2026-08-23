@@ -5,3 +5,5 @@ __pycache__/
 *.egg-info/
 .env
 books/*/delivered/
+books/
+.push_lock

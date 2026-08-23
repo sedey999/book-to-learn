@@ -6,7 +6,7 @@ description: |
   英文书自动联网核对术语并实时翻译；中文书无翻译环节。
   四种推送模板：PDF标准卡片、PDF大字闪卡、飞书交互卡片、飞书卡片+图片补充。
   提示词与数据分离，可自由变体为单词学习、诗词海报、新闻讲解等任务。
-version: 1.3.0
+version: 1.4.0
 homepage: https://github.com/sedey999/book-to-learn
 metadata:
   openclaw:
@@ -122,6 +122,10 @@ cd $SD && python3 book_setup.py init <book-slug> --title "书名" --lang <zh|en>
 ```
 写入 `books/<slug>/items.json`。
 
+### Step 4.5：数据与卡片的关系
+
+`items.json` 是唯一事实源：推送载荷（push_card.py next）直接读取 items.json 字段。`cards/*.html` 仅作人工预览，不参与推送链路；修改 items.json 后重新 gen-cards 即可刷新预览。
+
 ### Step 5：生成卡片和索引
 ```bash
 cd $SD && python3 book_setup.py gen-cards --slug <book-slug>
@@ -146,9 +150,9 @@ cd $SD && python3 book_setup.py prompt --slug <book-slug>
 
 ### 英文书流程（需翻译）
 
-1. **取载荷**：
+1. **取载荷**（不要加 --force，让脚本自身的当日/周末/锁守卫生效，防止重复推送）：
    ```bash
-   cd $SD && python3 push_card.py next --book <slug> --force > /tmp/b2l_payload.json
+   cd $SD && python3 push_card.py next --book <slug> > /tmp/b2l_payload.json
    ```
    > Windows 平台 `/tmp/` 不存在，改用 `%TEMP%` 或脚本输出建议的临时目录。
    解析输出。skip=true 则结束。
@@ -317,6 +321,7 @@ cd $SD && python3 book_setup.py prompt --slug <book-slug>
 | `upload_ima.py` | IMA 知识库上传（动态查找 ima-skill，密钥失效检测） |
 | `send_feishu.py` | 飞书 webhook 卡片推送（图床上传，中英文自适应） |
 | `send_feishu_api.py` | 飞书 Open API 推送（支持原生图片/文件直发，无需图床） |
+| `process_attachments.py` | 相关链接附件下载/转换/重命名（PNG 转 JPG，识别 HTML 错误页） |
 | `notify_failure.py` | 通用失败通知（参数化 webhook） |
 | `books/<slug>/` | 每本书独立数据（config/items/index/progress/daily-progress/cards/images/full_text） |
 
@@ -325,7 +330,7 @@ cd $SD && python3 book_setup.py prompt --slug <book-slug>
 - 查看所有书：`cd $SD && python3 push_card.py list-books`
 - 查看进度：`python3 push_card.py status --book <slug>`
 - 配置确认：`python3 book_setup.py summary <slug>`
-- 手动重推：`python3 push_card.py next --book <slug> --force`
+- 手动重推（跳过当日守卫，仅排障用；正常推送不要加 --force）：`python3 push_card.py next --book <slug> --force`
 - 重置进度：编辑 `books/<slug>/progress.json`，置 null 清空 history
 - 输出定时提示词：`python3 book_setup.py prompt <slug>`
 - 记录进度到 md：`python3 book_setup.py log-progress <slug> --card-id <id>`

@@ -33,9 +33,11 @@ def load_config(path):
 
 
 def esc_md(text):
-    """Escape special chars for Feishu markdown."""
+    """Escape special chars for Feishu markdown.
+    | would break markdown tables (terminology table), so escape it too."""
     if not text: return ''
-    return text.replace('\\', '\\\\').replace('*', '\\*').replace('_', '\\_').replace('[', '\\[')
+    return (text.replace('\\', '\\\\').replace('*', '\\*').replace('_', '\\_')
+                .replace('[', '\\[').replace('|', '\\|'))
 
 
 def md_links_to_feishu(text):
@@ -85,6 +87,8 @@ def upload_image(token, image_path):
     with open(image_path, 'rb') as f:
         image_data = f.read()
 
+    img_ext = os.path.splitext(image_path)[1].lstrip('.').lower() or 'png'
+    img_mime = 'image/png' if img_ext == 'png' else ('image/jpeg' if img_ext in ('jpg','jpeg') else 'image/%s' % img_ext)
     boundary = '----feishuapi' + str(hash(image_data) % 100000)
     body = b''
     body += ('--%s\r\n' % boundary).encode()
@@ -120,8 +124,11 @@ def upload_file(token, file_path):
     with open(file_path, 'rb') as f:
         file_data = f.read()
 
-    ext = os.path.splitext(file_path)[1].lstrip('.')
-    file_type = 'pdf' if ext == 'pdf' else 'stream'
+    ext = os.path.splitext(file_path)[1].lstrip('.').lower()
+    file_type = {'pdf': 'pdf', 'doc': 'doc', 'docx': 'doc',
+                 'xls': 'xls', 'xlsx': 'xls',
+                 'ppt': 'ppt', 'pptx': 'ppt',
+                 'mp4': 'mp4', 'opus': 'opus'}.get(ext, 'stream')
 
     boundary = '----feishuapi' + str(hash(file_data) % 100000)
     body = b''
@@ -133,7 +140,7 @@ def upload_file(token, file_path):
     body += f'{os.path.basename(file_path)}\r\n'.encode()
     body += ('--%s\r\n' % boundary).encode()
     body += ('Content-Disposition: form-data; name="file"; filename="%s"\r\n' % os.path.basename(file_path)).encode()
-    body += f'Content-Type: application/{ext}\r\n\r\n'.encode()
+    body += f'Content-Type: application/{ {"doc":"msword","docx":"msword","xls":"vnd.ms-excel","xlsx":"vnd.ms-excel","ppt":"vnd.ms-powerpoint","pptx":"vnd.ms-powerpoint","pdf":"pdf"}.get(ext, "octet-stream") }\r\n\r\n'.encode()
     body += file_data
     body += ('\r\n--%s--\r\n' % boundary).encode()
 
@@ -289,8 +296,7 @@ def build_card_content(payload, zh, language='en'):
         },
         "elements": elements
     }
-    return {"type": "template", "data": {"template_id": "", "template_variable": {}, "type": "template"},
-            "card": card}
+    return card
 
 
 def main():
@@ -359,13 +365,13 @@ def main():
     zh, payload = normalize_all(zh, payload, language)
 
     # Build and send card
-    card_content = build_card_content(payload, zh, language)
+    card = build_card_content(payload, zh, language)
     # Send as interactive message
     url = f'{FEISHU_BASE}/im/v1/messages?receive_id_type=chat_id'
     body = json.dumps({
         'receive_id': chat_id,
         'msg_type': 'interactive',
-        'content': json.dumps(card_content['card'], ensure_ascii=False)
+        'content': json.dumps(card, ensure_ascii=False)
     }, ensure_ascii=False).encode('utf-8')
 
     req = urllib.request.Request(url, data=body, headers={

@@ -64,7 +64,7 @@ def ima_api(api_path, body_dict):
     cid_path = os.path.expanduser('~/.config/ima/client_id')
     akey_path = os.path.expanduser('~/.config/ima/api_key')
     if not os.path.exists(cid_path) or not os.path.exists(akey_path):
-        return 'AUTH_FAIL', {'msg': 'IMA credentials not configured (~/.config/ima/)'}
+        return False, {'msg': 'IMA credentials not configured (~/.config/ima/)', 'auth_fail': True}
     cid = open(cid_path).read().strip()
     akey = open(akey_path).read().strip()
     opts = json.dumps({'clientId': cid, 'apiKey': akey})
@@ -79,19 +79,37 @@ def ima_api(api_path, body_dict):
     except:
         return False, {'parse_error': out[:300]}
     if resp.get('code') != 0:
-        msg = resp.get('msg', '')
-        low = msg.lower()
-        if any(k in low for k in ['auth', 'unauthorized', 'invalid', 'expired', 'token', 'credential', '密钥', '认证', '鉴权']):
-            return 'AUTH_FAIL', {'msg': msg, 'code': resp.get('code')}
-        return False, {'msg': msg, 'code': resp.get('code')}
+        return False, {'msg': resp.get('msg', ''), 'code': resp.get('code'), 'auth_fail': is_auth_error(resp)}
     return True, resp.get('data', {})
+
+def is_auth_error(resp):
+    """Classify by API error code first; keyword match is only a fallback.
+    Guessing by msg text mislabels e.g. 'invalid filename' as AUTH_FAIL,
+    which would skip retries and wrongly notify users that keys expired."""
+    code = resp.get('code')
+    if isinstance(code, int) and code != 0:
+        # known auth-ish codes (per IMA OpenAPI behavior) -> definitive True
+        if code in (10013, 10014, 10015, 10017, 10018, 10019, 10020, 10021, 10022,
+                    99991, 99992, 99993, 99994, 99995, 99996, 99997, 99998, 99999,
+                    40001, 40002, 40003, 40004, 40005, 40006, 40007, 40008, 40009,
+                    40100, 40101, 40102, 40103):
+            return True
+        # unknown numeric code -> fall through to keyword fallback (safer than guessing)
+    elif code in (None, 0, '') and not resp.get('msg'):
+        return False
+    # fallback for unknown numeric/string codes: match explicit auth phrases only
+    msg = (resp.get('msg') or '').lower()
+    return any(k in msg for k in ['unauthorized', 'invalid api key', 'invalid apikey',
+                                  'api key expired', 'apikey expired', 'credential',
+                                  'auth fail', 'authentication', 'token expired',
+                                  '鉴权失败', '密钥失效', '密钥过期', '认证失败', '令牌过期', '凭证无效'])
 
 def find_kb_by_name(name):
     cursor = ''
     while True:
         ok, data = ima_api('openapi/wiki/v1/search_knowledge_base', {'query': name, 'cursor': cursor, 'limit': 20})
         if ok is not True and ok != True:
-            return None, data
+            return None, data  # data carries auth_fail flag when applicable
         for item in data.get('info_list', []):
             if item.get('kb_name') == name:
                 return item.get('kb_id'), None
@@ -100,19 +118,29 @@ def find_kb_by_name(name):
         cursor = data.get('next_cursor', '')
 
 def find_folder_by_name(kb_id, name):
-    ok, data = ima_api('openapi/wiki/v1/get_knowledge_list', {'knowledge_base_id': kb_id, 'cursor': '', 'limit': 50})
-    if ok is not True and ok != True:
-        return None, data
-    for item in data.get('knowledge_list', []):
-        if item.get('media_type') == 99 and item.get('title') == name:
-            return item.get('media_id'), None
-    return None, {'msg': 'folder not found: ' + name}
+    cursor = ''
+    while True:  # paginate: folders beyond page 1 must be found too
+        ok, data = ima_api('openapi/wiki/v1/get_knowledge_list', {'knowledge_base_id': kb_id, 'cursor': cursor, 'limit': 50})
+        if ok is not True and ok != True:
+            return None, data
+        for item in data.get('knowledge_list', []):
+            if item.get('media_type') == 99 and item.get('title') == name:
+                return item.get('media_id'), None
+        if data.get('is_end'):
+            return None, {'msg': 'folder not found: ' + name}
+        cursor = data.get('next_cursor', '')
+        if not cursor:
+            return None, {'msg': 'folder not found: ' + name}
 
 def notify_failure(book_dir, config, reason):
     script = os.path.join(BASE, 'notify_failure.py')
     cfg_path = os.path.join(book_dir, 'config.json') if book_dir else (config or '')
-    subprocess.run(['python3.11', script, '--book', '', '--stage', 'upload', '--reason', reason,
-                    '--config', cfg_path], capture_output=True, timeout=30)
+    try:
+        subprocess.run([sys.executable, script, '--book', '', '--stage', 'upload', '--reason', reason,
+                        '--config', cfg_path], capture_output=True, timeout=30)
+    except Exception:
+        # notification is best-effort; the exit code 2 still signals AUTH_FAIL
+        pass
 
 def upload(file_path, config, book_dir=None):
     if not IMA_SKILL_DIR:
@@ -127,11 +155,19 @@ def upload(file_path, config, book_dir=None):
 
     kb_id, err = find_kb_by_name(kb_name)
     if kb_id is None:
+        if isinstance(err, dict) and err.get('auth_fail'):
+            notify_failure(book_dir, config, 'IMA密钥失效: ' + str(err.get('msg', '')))
+            print(json.dumps({'ok': False, 'stage': 'find_kb', 'auth_fail': True}, ensure_ascii=False))
+            return 2
         print(json.dumps({'ok': False, 'stage': 'find_kb', 'error': err}, ensure_ascii=False))
         return 1
     folder_id = None
     if folder_name:
-        folder_id, _ = find_folder_by_name(kb_id, folder_name)
+        folder_id, folder_err = find_folder_by_name(kb_id, folder_name)
+        if folder_id is None and isinstance(folder_err, dict) and folder_err.get('auth_fail'):
+            notify_failure(book_dir, config, 'IMA密钥失效: ' + str(folder_err.get('msg', '')))
+            print(json.dumps({'ok': False, 'stage': 'find_folder', 'auth_fail': True}, ensure_ascii=False))
+            return 2
 
     # preflight
     rc, out, err = run([NODE, PREFLIGHT, '--file', file_path])
@@ -153,8 +189,8 @@ def upload(file_path, config, book_dir=None):
     body = {'params': [{'name': file_name, 'media_type': media_type}], 'knowledge_base_id': kb_id}
     if folder_id: body['folder_id'] = folder_id
     ok, data = ima_api('openapi/wiki/v1/check_repeated_names', body)
-    if ok == 'AUTH_FAIL':
-        notify_failure(book_dir, config, 'IMA密钥失效: ' + data.get('msg',''))
+    if data.get('auth_fail'):
+        notify_failure(book_dir, config, 'IMA密钥失效: ' + str(data.get('msg','')))
         print(json.dumps({'ok': False, 'stage': 'check_repeated', 'auth_fail': True}, ensure_ascii=False))
         return 2
     if ok is not True and ok != True:
@@ -170,8 +206,8 @@ def upload(file_path, config, book_dir=None):
     body = {'file_name': file_name, 'file_size': file_size, 'content_type': content_type,
             'knowledge_base_id': kb_id, 'file_ext': file_ext}
     ok, data = ima_api('openapi/wiki/v1/create_media', body)
-    if ok == 'AUTH_FAIL':
-        notify_failure(book_dir, config, 'IMA密钥失效: ' + data.get('msg',''))
+    if data.get('auth_fail'):
+        notify_failure(book_dir, config, 'IMA密钥失效: ' + str(data.get('msg','')))
         print(json.dumps({'ok': False, 'stage': 'create_media', 'auth_fail': True}, ensure_ascii=False))
         return 2
     if ok is not True and ok != True:
@@ -198,8 +234,8 @@ def upload(file_path, config, book_dir=None):
             'file_info': {'cos_key': cos.get('cos_key',''), 'file_size': file_size, 'file_name': file_name}}
     if folder_id: body['folder_id'] = folder_id
     ok, data = ima_api('openapi/wiki/v1/add_knowledge', body)
-    if ok == 'AUTH_FAIL':
-        notify_failure(book_dir, config, 'IMA密钥失效: ' + data.get('msg',''))
+    if data.get('auth_fail'):
+        notify_failure(book_dir, config, 'IMA密钥失效: ' + str(data.get('msg','')))
         print(json.dumps({'ok': False, 'stage': 'add_knowledge', 'auth_fail': True}, ensure_ascii=False))
         return 2
     if ok is not True and ok != True:
