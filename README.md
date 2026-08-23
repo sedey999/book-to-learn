@@ -120,7 +120,7 @@ python3 $SKILL_DIR/book_setup.py prompt <book-slug>
 
 ## 📚 示例案例：Open Music Theory
 
-`examples/open-music-theory/` 目录包含一个完整的拆书案例，基于开放乐理教材，正在 IMA 知识库中每日更新（知识库与文件夹名称在首次配置时由用户自选）。
+`examples/open-music-theory/` 目录包含一个完整的拆书案例，基于开放乐理教材，目前正在 IMA 知识库「【权威】音乐理论与AI创作」->「每日一个知识点」文件夹中每日更新。
 
 ### 案例信息
 
@@ -130,7 +130,7 @@ python3 $SKILL_DIR/book_setup.py prompt <book-slug>
 - **原文补全**：案例早期生成的 items.json 曾存在 explanationEn 截断在 6000 字符的问题；现已通过推送前强制运行 `extract_images.py`（Step 1b）从原书网站逐卡补全完整正文与图片，历史数据已全部修复
 - **附件处理**：relatedLinks 中的文件附件（PDF/DOCX/图片等）自动下载、PNG 转 JPG、重命名后随主卡片上传
 - **推送周期**：每日 1 张
-- **推送目标**：IMA 知识库用户自建文件夹（首次配置时指定，如「每日一个知识点」）
+- **推送目标**：IMA 知识库「【权威】音乐理论与AI创作」->「每日一个知识点」文件夹（实际运行中的知识库，欢迎在 IMA 中查看；自建部署时名称在首次配置中自选）
 
 ### 实际运行的定时任务提示词
 
@@ -139,9 +139,9 @@ python3 $SKILL_DIR/book_setup.py prompt <book-slug>
 ```
 执行 omt-daily-push skill：推送今日的 Open Music Theory 双语知识点卡片。
 
-严格按 SKILL.md 流程执行（SKILL_DIR 指向你本地安装的 omt-daily-push skill 目录，示例中记为 $SD）：
+严格按 SKILL.md 流程执行（SKILL_DIR=/home/admin/.openclaw/skills/omt-daily-push）：
 
-1. cd $SD && python3 push_card.py next > /tmp/omt_payload.json
+1. cd /home/admin/.openclaw/skills/omt-daily-push && python3 push_card.py next > /tmp/omt_payload.json
 解析输出。若 skip=true（如 all_done/weekend/already_pushed/push_in_progress），告知并结束。提取 nextId 和 date_str 备用。（不要加 --force，让防重推守卫生效）
 
 2. 从载荷 terminology 数组提取每个英文术语，使用 WebSearch（SearXNG skill）联网查询其在音乐理论领域的权威中文译法（检索词如 "music theory <term> 中文 译名"），汇总为 terminologyZh 对象。必须核对，不可凭记忆。
@@ -151,23 +151,23 @@ python3 $SKILL_DIR/book_setup.py prompt <book-slug>
 4. 写入 /tmp/omt_zh.json（含 coreIdeaZh/explanationZh/quoteZh/applicationZh/terminologyZh/relatedLinksZh/note）。
 
 5. 生成卡片式 PDF（脚本自动生成带中文主题的文件名）：
-cd $SD && python3 gen_card_pdf.py --payload /tmp/omt_payload.json --zh /tmp/omt_zh.json
+cd /home/admin/.openclaw/skills/omt-daily-push && python3 gen_card_pdf.py --payload /tmp/omt_payload.json --zh /tmp/omt_zh.json
 从输出中提取生成的 PDF 路径（pdf字段），保存为 PDF_PATH 变量。
 
 6. 上传主 PDF 到 IMA 知识库：
-cd $SD && python3 upload_ima.py --file "$PDF_PATH"
+cd /home/admin/.openclaw/skills/omt-daily-push && python3 upload_ima.py --file "$PDF_PATH"
 
 - 退出码 0 = 成功，继续步骤 7
 - 退出码 2 = IMA 密钥失效（已自动发飞书通知），本次不计进度，告知用户后结束
 - 退出码 1 = 其他错误，不更新进度，报告错误后结束
 
 7. 下载并上传相关链接中的附属文件：
-cd $SD && python3 process_attachments.py --payload /tmp/omt_payload.json --date <date_str> --card-id <nextId> --out-dir /tmp/omt_attachments
+cd /home/admin/.openclaw/skills/omt-daily-push && python3 process_attachments.py --payload /tmp/omt_payload.json --date <date_str> --card-id <nextId> --out-dir /tmp/omt_attachments
 - 脚本自动筛选文件链接（.pdf/.docx/.xlsx/.pptx/.png/.jpg 等）、跳过已内嵌图片、下载（带 UA）、PNG 自动转 JPG、统一重命名为 OMT_<date>_<nextId>_<原文件名>
 - 读取 /tmp/omt_attachments/attachments.json，对 processed 数组逐个用 upload_ima.py 上传；附件失败不影响主进度，但需通知
 
 8. 仅主PDF上传成功后记录进度（附属文件上传失败不影响进度记录）：
-cd $SD && python3 push_card.py mark <nextId> success
+cd /home/admin/.openclaw/skills/omt-daily-push && python3 push_card.py mark <nextId> success
 
 9. 汇报：今日推送第 X/118 张、主题、术语核对要点、PDF 及附属文件上传情况、所有文件已上传至 IMA 知识库「每日一个知识点」文件夹。
 ```
