@@ -12,9 +12,13 @@ For Chinese books: --language zh (no --zh needed, single-language card)
 import json, sys, os, argparse, datetime, re, html as html_mod
 from weasyprint import HTML
 from normalize_quotes import normalize_all
+import render_common as _rc
 
 def esc(s):
     return html_mod.escape(s or '', quote=False)
+
+def esc_attr(s):
+    return html_mod.escape(s or '', quote=True)
 
 def md_links_to_text(text):
     """Convert markdown [text](url) to 'text (url)' plain text — IMA cannot click links."""
@@ -23,6 +27,8 @@ def md_links_to_text(text):
 
 def paras(text, md=False):
     out = []
+    # 先清 MDX/JSX 组件标签（<Note>、<img> 等），否则会被当普通文本字面显示
+    text = _rc.clean_mdx(text)
     for ln in (text or '').split('\n'):
         ln = ln.strip()
         if ln:
@@ -89,7 +95,7 @@ def build_html(payload, zh, date_str, language='en'):
     # image (base64 data URI or URL)
     img_html = ''
     if payload.get('image'):
-        img_html = '<div class="img-wrap"><img src="%s"></div>' % esc(payload['image'])
+        img_html = '<div class="img-wrap"><img src="%s"></div>' % esc_attr(payload['image'])
 
     # related links — plain text URLs (IMA can't click)
     links_html = ''
@@ -161,7 +167,7 @@ body {{ font-family: "Microsoft YaHei", "微软雅黑", "PingFang SC", "Hiragino
 </style></head><body>
 <div class="card">
   <div class="card-head">
-    <div class="progress">第 {idx} / {total} 张 · {esc(date_str)}</div>
+    <div class="progress">第 {esc(str(idx))} / {esc(str(total))} 张 · {esc(date_str)}</div>
     <div class="topic">{topic}</div>
     <span class="chapter">{chapter}</span>
   </div>
@@ -183,13 +189,25 @@ def main():
     args = ap.parse_args()
     payload = json.load(open(args.payload, encoding='utf-8'))
     zh = json.load(open(args.zh, encoding='utf-8')) if args.zh else None
-    language = args.language or payload.get('language', 'en')
+    # 未显式传 --language 时优先用 payload 里的语言（argparse default 恒真值会吃掉回退）
+    language = args.language if '--language' in sys.argv else payload.get('language', 'en')
     zh, payload = normalize_all(zh, payload, language)  # 规范化中文引号
     date_str = datetime.date.today().isoformat()
     html_str = build_html(payload, zh, date_str, language=language)
-    HTML(string=html_str).write_pdf(args.out)
+    HTML(string=_rc.patch_style(html_str)).write_pdf(args.out)
+    # 产物校验：非空 + PDF 魔数（design-spec：产物必须校验，失败中止）
+    try:
+        size = os.path.getsize(args.out)
+        with open(args.out, 'rb') as _f:
+            magic = _f.read(4)
+    except OSError:
+        size, magic = 0, b''
+    if size <= 0 or magic != b'%PDF':
+        print(json.dumps({'ok': False, 'error': 'PDF 产物无效（空文件或魔数不符）: %s' % args.out},
+                         ensure_ascii=False), file=sys.stderr)
+        sys.exit(1)
     print(json.dumps({'ok': True, 'pdf': args.out, 'date': date_str,
-                      'size': os.path.getsize(args.out), 'language': language}, ensure_ascii=False))
+                      'size': size, 'language': language}, ensure_ascii=False))
 
 if __name__ == '__main__':
     main()

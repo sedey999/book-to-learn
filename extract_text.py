@@ -9,7 +9,7 @@ Usage:
 Output: writes extracted text to <output.txt> (default: stdout).
 Single-source failures raise ExtractionError but print partial results.
 """
-import os, sys, re, subprocess, html, argparse
+import os, sys, re, subprocess, html, argparse, json
 
 class ExtractionError(Exception):
     pass
@@ -43,10 +43,11 @@ def extract_pdf(path):
     # 1. pdftotext (poppler) — fastest, best for text-heavy PDFs
     try:
         r = subprocess.run(['pdftotext', '-layout', path, '-'],
-                           capture_output=True, text=True, timeout=120)
+                           capture_output=True, text=True, timeout=120,
+                           encoding='utf-8', errors='replace')
         if r.returncode == 0 and len(r.stdout.strip()) > 100:
             return r.stdout
-    except (FileNotFoundError, subprocess.TimeoutExpired):
+    except Exception:  # pdftotext 缺失/超时/中文 Windows 解码失败都走回退链
         pass
     # 2. pypdf
     try:
@@ -107,12 +108,27 @@ def extract_docx(path):
     raise ExtractionError(f"DOCX extraction failed: {path}")
 
 # ── HTML ──
+def _read_text(path):
+    """HTML 文本读取：utf-8 严格 → gb18030（errors='replace'，国内站点常见 GBK 导出）
+    → utf-8 ignore 兜底。GBK 回退时打 warn，避免静默丢中文。"""
+    raw = open(path, 'rb').read()
+    try:
+        return raw.decode('utf-8')
+    except UnicodeDecodeError:
+        pass
+    try:
+        text = raw.decode('gb18030', errors='replace')
+        print('[warn] %s: 非 UTF-8 编码，已按 GB18030 解码' % path, file=sys.stderr)
+        return text
+    except Exception:
+        return raw.decode('utf-8', errors='ignore')
+
+
 def extract_html(path):
     """HTML: beautifulsoup4 → stdlib html.parser"""
     try:
         from bs4 import BeautifulSoup
-        with open(path, 'r', encoding='utf-8', errors='ignore') as f:
-            soup = BeautifulSoup(f.read(), 'html.parser')
+        soup = BeautifulSoup(_read_text(path), 'html.parser')
         # remove scripts/styles
         for tag in soup(['script', 'style', 'nav', 'footer', 'header']):
             tag.decompose()
@@ -135,8 +151,7 @@ def extract_html(path):
                     self.text.append('\n')
             def handle_data(self, data):
                 if not self.skip: self.text.append(data)
-        with open(path, 'r', encoding='utf-8', errors='ignore') as f:
-            p = TextExtractor(); p.feed(f.read())
+        p = TextExtractor(); p.feed(_read_text(path))
         text = re.sub(r'\n{3,}', '\n\n', ''.join(p.text)).strip()
         if text:
             return text

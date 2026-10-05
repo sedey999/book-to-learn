@@ -4,7 +4,7 @@ Generate a LARGE-FONT flashcard PDF (A4, minimal content, huge fonts).
 Ideal for vocabulary / terminology / single-concept learning.
 
 Design philosophy: LESS text, BIGGER fonts. A flashcard, not a document.
-  - Title: 48-64px (auto-shrink to fit one line, minimum 48px)
+  - Title: 42-64px (auto-shrink to fit one line, minimum 42px)
   - Core content: 24-28px
   - Terms: 22-24px
   - NO English original text (bilingual mode shows Chinese only)
@@ -18,9 +18,13 @@ Usage:
 import json, sys, os, argparse, datetime, re, html as html_mod
 from weasyprint import HTML
 from normalize_quotes import normalize_all
+import render_common as _rc
 
 def esc(s):
     return html_mod.escape(s or '', quote=False)
+
+def esc_attr(s):
+    return html_mod.escape(s or '', quote=True)
 
 def md_links_to_text(text):
     return re.sub(r'\[([^\]]+)\]\(([^)]+)\)',
@@ -36,9 +40,9 @@ def paras(text, md=False):
             out.append(p)
     return out
 
-def estimate_title_size(topic, max_chars_per_line=18):
+def estimate_title_size(topic):
     """Estimate a good font size for the title so it fits nicely.
-    Longer titles get smaller fonts (but minimum 48px).
+    Longer titles get smaller fonts (but minimum 42px).
     Short titles get up to 64px."""
     length = len(topic)
     if length <= 8:
@@ -93,7 +97,7 @@ def build_html(payload, zh, date_str, language='en'):
     # image (if any)
     img_html = ''
     if payload.get('image'):
-        img_html = '<div class="img-wrap"><img src="%s"></div>' % esc(payload['image'])
+        img_html = '<div class="img-wrap"><img src="%s"></div>' % esc_attr(payload['image'])
 
     body = ''.join(sections)
 
@@ -129,7 +133,7 @@ body {{ font-family: "Microsoft YaHei", "微软雅黑", "PingFang SC", "Hiragino
 </style></head><body>
 <div class="card">
   <div class="card-head">
-    <div class="progress">第 {idx} / {total} 张</div>
+    <div class="progress">第 {esc(str(idx))} / {esc(str(total))} 张</div>
     <div class="topic">{main_title}</div>
     {('<div class="topic-en">' + en_subtitle + '</div>') if en_subtitle else ''}
     <span class="chapter">{chapter}</span>
@@ -152,17 +156,29 @@ def main():
     args = ap.parse_args()
     payload = json.load(open(args.payload, encoding='utf-8'))
     zh = json.load(open(args.zh, encoding='utf-8')) if args.zh else None
-    language = args.language or payload.get('language', 'en')
+    # 未显式传 --language 时优先用 payload 里的语言（argparse default 恒真值会吃掉回退）
+    language = args.language if '--language' in sys.argv else payload.get('language', 'en')
     zh, payload = normalize_all(zh, payload, language)  # 规范化中文引号
     date_str = datetime.date.today().isoformat()
     card_id = payload.get('nextId', 'card')
     topic_zh = (zh or {}).get('topicZh', '')
     html_str = build_html(payload, zh, date_str, language=language)
-    HTML(string=html_str).write_pdf(args.out)
+    HTML(string=_rc.patch_style(html_str)).write_pdf(args.out)
+    # 产物校验：非空 + PDF 魔数（design-spec：产物必须校验，失败中止）
+    try:
+        size = os.path.getsize(args.out)
+        with open(args.out, 'rb') as _f:
+            magic = _f.read(4)
+    except OSError:
+        size, magic = 0, b''
+    if size <= 0 or magic != b'%PDF':
+        print(json.dumps({'ok': False, 'error': 'PDF 产物无效（空文件或魔数不符）: %s' % args.out},
+                         ensure_ascii=False), file=sys.stderr)
+        sys.exit(1)
     import re as _re
     safe_zh = _re.sub(r'[\\/:*?"<>|]', '_', topic_zh)[:40] if topic_zh else ''
     print(json.dumps({'ok': True, 'pdf': args.out, 'date': date_str,
-                      'size': os.path.getsize(args.out), 'language': language,
+                      'size': size, 'language': language,
                       'card_id': card_id, 'topicZh': topic_zh,
                       'template': 'pdf-large', 'suggestedSuffix': safe_zh}, ensure_ascii=False))
 

@@ -4,11 +4,11 @@ Generate a supplementary image (flashcard style) — auto-height.
 Used as a visual supplement to Feishu card messages — NOT for standalone push.
 
 Design: BIG fonts, MINIMAL content. Like a physical flashcard.
-  - Title: huge (40-56px auto-sized)
+  - Title: huge (36-56px auto-sized)
   - Quote: large (28-32px)
   - Terms: large (22-26px)
   - NO core idea, NO explanation, NO links — just the essentials
-  - Width fixed at 750px; height auto-adapts to content (no fixed aspect ratio)
+  - Width fixed at 800px (rasterized at dpi=150 → 1250px wide); height auto-adapts to content (no fixed aspect ratio)
   - Card-style design with borders, section dividers, tag/badge elements
 
 Usage:
@@ -20,15 +20,18 @@ Design inspired by react-paper-memo (github.com/JustinChia/react-paper-memo) lar
 NOTE: No emoji/special symbols in HTML output — weasyprint cannot render them.
 NOTE: After generation, the script auto-verifies the PNG is valid and non-empty.
 """
-import json, sys, os, argparse, datetime, re, html as html_mod, tempfile
+import json, sys, os, argparse, datetime, re, html as html_mod
 from weasyprint import HTML
 from normalize_quotes import normalize_all
 
 def esc(s):
     return html_mod.escape(s or '', quote=False)
 
+def esc_attr(s):
+    return html_mod.escape(s or '', quote=False)
+
 def estimate_title_size(topic, fmt='auto'):
-    """Auto-size title: shorter = bigger. Min 40px."""
+    """Auto-size title: shorter = bigger. Min 36px."""
     length = len(topic)
     base = 56 if fmt == '1:1' else 48
     if length <= 6:
@@ -50,13 +53,13 @@ def build_html(payload, zh, date_str, language='en', fmt='auto'):
     main_title = esc(topic_zh) if (bilingual and topic_zh) else topic
     en_subtitle = topic if (bilingual and topic_zh) else ''
 
-    page_w = '750px'
+    page_w = '800px'
 
     if fmt == '1:1':
-        page_h = '750px'
+        page_h = '800px'
         padding = '24px'
     elif fmt == '1:4':
-        page_h = '3000px'
+        page_h = '3200px'
         padding = '32px'
     else:
         page_h = '4000px'
@@ -98,7 +101,7 @@ def build_html(payload, zh, date_str, language='en', fmt='auto'):
     # image
     img_html = ''
     if payload.get('image'):
-        img_html = '<div class="img-wrap"><img src="%s"></div>' % esc(payload['image'])
+        img_html = '<div class="img-wrap"><img src="%s"></div>' % esc_attr(payload['image'])
 
     body = ''.join(sections)
 
@@ -273,7 +276,7 @@ body {{
 </style></head><body>
 <div class="card">
     <div class="card-head">
-        <div class="progress">第 {idx} / {total} 张</div>
+        <div class="progress">第 {esc(str(idx))} / {esc(str(total))} 张</div>
         <div class="topic">{main_title}</div>
         {('<div class="topic-en">' + en_subtitle + '</div>') if en_subtitle else ''}
         {('<span class="chapter-badge">' + chapter + '</span>') if chapter else ''}
@@ -332,55 +335,40 @@ def main():
     ap.add_argument('--zh', help='translation JSON (for English books)')
     ap.add_argument('--out', required=True, help='output PNG path')
     ap.add_argument('--format', default='auto', choices=['1:1', '1:4', 'auto'],
-                    help='1:1=750x750, 1:4=750x3000, auto=height adapts to content')
+                    help='1:1=800x800, 1:4=800x3200, auto=height adapts to content')
     ap.add_argument('--language', default='en', choices=['zh', 'en'])
     args = ap.parse_args()
     payload = json.load(open(args.payload, encoding='utf-8'))
     zh = json.load(open(args.zh, encoding='utf-8')) if args.zh else None
-    language = args.language or payload.get('language', 'en')
+    language = args.language if '--language' in sys.argv else payload.get('language', 'en')
     zh, payload = normalize_all(zh, payload, language)
     date_str = datetime.date.today().isoformat()
 
     html_str = build_html(payload, zh, date_str, language=language, fmt=args.format)
-    tmp_pdf = tempfile.mktemp(suffix='.pdf')
-    HTML(string=html_str).write_pdf(tmp_pdf)
-
+    import render_common as _rc
     try:
-        from pdf2image import convert_from_path
-        images = convert_from_path(tmp_pdf, dpi=150)
-        if images:
-            if len(images) > 1:
-                from PIL import Image as PILImage
-                total_h = sum(img.height for img in images)
-                max_w = max(img.width for img in images)
-                combined = PILImage.new('RGB', (max_w, total_h), 'white')
-                y = 0
-                for img in images:
-                    combined.paste(img, (0, y))
-                    y += img.height
-                combined.save(args.out, 'PNG')
-            else:
-                images[0].save(args.out, 'PNG')
-
-            if args.format == 'auto':
-                w, h = crop_whitespace(args.out)
-
-            verification = verify_image(args.out)
-            result = {'ok': True, 'image': args.out, 'format': args.format,
-                      'size': os.path.getsize(args.out), 'date': date_str,
-                      'pages': len(images), 'verification': verification}
-            print(json.dumps(result, ensure_ascii=False))
-            if not verification.get('ok'):
-                sys.exit(2)
-        else:
-            print(json.dumps({'ok': False, 'error': 'pdf2image returned no images'}, ensure_ascii=False))
-            sys.exit(1)
-    except ImportError:
-        print(json.dumps({'ok': False, 'error': 'pdf2image not installed. Run: pip install pdf2image (also needs poppler)'}, ensure_ascii=False))
+        # 统一走 render_common：破折号兜底 CSS + 光栅化（PyMuPDF 优先，poppler 回退）
+        # + 裁白（阈值/留白与 1.4.1 一致）+ 产物校验
+        rendered = _rc.html_to_png(_rc.patch_style(html_str), args.out, dpi=150,
+                                   crop=(args.format == 'auto'))
+    except ImportError as e:
+        print(json.dumps({'ok': False, 'error': 'html_to_png 依赖缺失: %s；请 '
+                          'pip install weasyprint pymupdf（或保留 pdf2image + 系统 poppler）' % e},
+                         ensure_ascii=False))
         sys.exit(1)
-    finally:
-        if os.path.exists(tmp_pdf):
-            os.remove(tmp_pdf)
+    verification = rendered['verification']
+    if args.format in ('1:1', '1:4') and rendered.get('pages', 1) != 1:
+        # 固定画布比例：多页会被纵向拼接成超比例长图，必须显式失败而不是静默交付
+        print(json.dumps({'ok': False, 'error': '内容溢出固定画布（PDF %d 页 > 1）：%s 模式下应精简内容'
+                          % (rendered['pages'], args.format)}, ensure_ascii=False))
+        sys.exit(2)
+    result = {'ok': True, 'image': args.out, 'format': args.format,
+              'size': os.path.getsize(args.out), 'dimensions': rendered['size'],
+              'date': date_str, 'pages': rendered['pages'],
+              'rasterizer': rendered['rasterizer'], 'verification': verification}
+    print(json.dumps(result, ensure_ascii=False))
+    if not verification.get('ok'):
+        sys.exit(2)
 
 if __name__ == '__main__':
     main()

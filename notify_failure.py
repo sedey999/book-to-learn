@@ -59,7 +59,7 @@ def main():
     book_title = args.book
     if args.config:
         cfg = load_config(args.config)
-        webhook = cfg.get('notifyWebhook', webhook)
+        webhook = cfg.get('notifyWebhook') or webhook  # 空串不能覆盖环境变量
         book_title = cfg.get('bookTitle', book_title)
     if not webhook:
         print(json.dumps({"sent": False, "error": "no webhook configured (set notifyWebhook in config.json or BOOK_LEARN_WEBHOOK env)"}, ensure_ascii=False))

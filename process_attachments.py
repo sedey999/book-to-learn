@@ -14,9 +14,11 @@ Notes:
 - No emoji in output (weasyprint/console-safe).
 """
 import argparse
+import hashlib
 import json
 import os
 import re
+import shutil
 import subprocess
 from urllib.parse import urlparse
 
@@ -35,12 +37,20 @@ def run_curl(url, out_path, referer=""):
         cmd += ["-e", referer]
     cmd += [url, "-o", out_path]
     try:
-        subprocess.run(cmd, capture_output=True, timeout=90)
+        r = subprocess.run(cmd, capture_output=True, timeout=90)
     except subprocess.TimeoutExpired:
+        if os.path.exists(out_path):
+            os.unlink(out_path)
+        return False
+    if r.returncode != 0:
+        # curl 失败（--max-time 截断 / DNS / TLS / HTTP>=400）：残留的半截文件必须删掉
+        if os.path.exists(out_path):
+            os.unlink(out_path)
         return False
     if not os.path.exists(out_path):
         return False
-    if os.path.getsize(out_path) < 64:
+    min_size = 16 if os.path.splitext(out_path)[1].lower() in IMAGE_EXTS else 64
+    if os.path.getsize(out_path) < min_size:
         os.unlink(out_path)
         return False
     # Detect HTML error pages (403/404 bodies served as 200)
@@ -88,17 +98,21 @@ def main():
     args = ap.parse_args()
 
     os.makedirs(args.out_dir, exist_ok=True)
+    if not shutil.which('curl'):
+        print(json.dumps({'ok': False, 'error': '未找到 curl 命令（process_attachments 依赖 curl 下载附件）'}))
+        raise SystemExit(1)
 
-    with open(args.payload) as f:
+    with open(args.payload, encoding='utf-8') as f:
         payload = json.load(f)
 
     prefix = args.prefix or os.environ.get('B2L_PREFIX') or (payload.get('bookSlug') or 'B2L').upper()
 
     # Collect already embedded image srcs to skip duplicates
     embedded_srcs = set()
-    img = payload.get('image', '')
-    if img and img.startswith('data:'):
-        embedded_srcs.add('__EMBEDDED__')
+    img = payload.get('image', '') or ''
+    if img and not img.startswith('data:'):
+        embedded_srcs.add(img)   # URL 型主配图：链接相同则跳过重复上传
+    # data URI 主配图无法与链接 URL 匹配（原 __EMBEDDED__ 哨兵永远匹配不上，是死逻辑）
     for im in payload.get('images', []) or []:
         src = im.get('src', '') if isinstance(im, dict) else ''
         if src:
@@ -141,7 +155,8 @@ def main():
                     os.unlink(tmp_path)
                 continue
 
-        final_name = f"{prefix}_{args.date}_{args.card_id}_{orig_name}"
+        short_hash = hashlib.md5(href.encode()).hexdigest()[:6]
+        final_name = f"{prefix}_{args.date}_{args.card_id}_{short_hash}_{orig_name}"
         final_renamed = os.path.join(args.out_dir, final_name)
         if final_path != final_renamed:
             os.rename(final_path, final_renamed)
@@ -169,7 +184,7 @@ def main():
         'skipped': skipped,
         'out_dir': args.out_dir,
     }
-    with open(os.path.join(args.out_dir, 'attachments.json'), 'w') as f:
+    with open(os.path.join(args.out_dir, 'attachments.json'), 'w', encoding='utf-8') as f:
         json.dump(result, f, indent=2, ensure_ascii=False)
     print("Result saved to %s" % os.path.join(args.out_dir, 'attachments.json'))
 

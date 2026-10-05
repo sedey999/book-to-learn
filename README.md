@@ -1,10 +1,50 @@
 # 📖 Book-to-Learn
 
-**把任意一本书分解成日常学习任务，每日推送一张知识点卡片。**
+**把「书 / 文档站 / 一份资料」拆成学习卡片。**
 
-支持中英文书籍（PDF / DOCX / HTML / EPUB / TXT），拆解为知识点后每日推送一张卡片到 IMA 知识库（PDF）或飞书（卡片消息）。英文书自动联网核对术语并实时翻译；中文书无翻译环节。
+三种来源模式：**书籍**（PDF / DOCX / HTML / EPUB / TXT，拆解后每日推送一张卡片）、
+**网站**（sitemap + 导航抓取）、**资料拆卡**（把国标 / 手册 / 教程 / 长网页拆成
+「一图一知识点」的竖版卡片长图，一次性出图）。英文书自动联网核对术语并实时翻译；中文无翻译环节。
 
-**它不只是一本书的阅读器，更是一个可自由变体的每日学习引擎。**
+**跨平台为底**：默认产物落本地目录，IMA / 飞书只是可选渠道；操作手册与进度一律写在工作目录，不依赖任何平台。
+
+## 🆕 v1.6 新增
+
+- **模式 C「资料拆卡」**：一份资料 → 一整套「一图一知识点」竖版卡片长图
+  - `gen_card_tile.py`：**3:4（默认）/ 9:16 / 1:1 / 4:3 / 16:9** 五种画布；
+    「先测量内容高度 → 溢出则整体缩字号（k）」的**自适应防裁切**；内置**像素级校验**
+    （尺寸 / 页数 / 空白 / 页脚），失败非 0 退出
+  - `tile_setup.py`：在工作目录建**任务文件夹**（如 `标点符号规范/`），内含
+    `GUIDE.md`（操作手册，内嵌全部规则与踩坑）+ `PROGRESS.md`（进度）+ `cards.json` + `src/` + `out/`
+  - 强制三道门禁：**先示例卡确认样式 → 全量文本稿确认 → 才批量出图**
+- **跨平台改造**：`pushMethod` 默认 `local`（零依赖）；IMA / 飞书降为可选渠道；
+  文档一律落工作目录（不落 skill）；新增 `references/platform-notes.md`（含 IMA 环境适配、
+  无删除接口的改名策略、长文本 WAF 绕行等）
+- **踩坑内嵌**：拆卡实战经验（测量阈值须含页脚、`flex: 0 0 auto`、weasyprint 下 `min-width:0` 无效、
+  视觉模型误判一律以像素为准、字体家族 ≤4、着重号圆点防拉伸…）已写进 `SKILL.md` 与生成的 `GUIDE.md`
+
+## 🆕 v1.5 新增
+
+- **两种来源**：书籍（原有）+ **网站**（`sitemap` + 首页导航双通道抓取，正文优先抓 `.md` 源）
+- **五种卡片类型**：A4 标准卡片 / 大字闪卡 / 闪卡配图 / **移动端学习长图** / **中英对照文档**
+  （`render.py` 按「类型 → 引擎」调度，映射可在 config 里覆盖）
+- **批量推送**：`push_card.py next --book X --n 5` 一次取 5 张；`mark --ids a,b,c success` 一次性回写
+  （`--n 1` 仍是原来的「每日一张 + 当日锁」语义）
+- **分章节内容源**：内容多时可拆成 `items/index.json` + `items/ch01.json`…，`items_io.py` 两种布局通吃
+- **首次启动确认门禁**：配置未与用户逐项确认前，`next` 直接拒绝发载荷（防「没确认就开跑」）
+- **文档层**：操作指南 + 进度笔记落在本地持久化目录（可选镜像到知识库笔记），
+  会话记忆被压缩或换人接手后读它们即可恢复
+- **推送前校验**：`validate.py` 检查内容源一致性 + **中英逐块对齐**（块数不一致会错位）
+- **开箱自检**：`setup_verify.py`（依赖 / 光栅化通道 / 中文字体 / 破折号字体）+ `tests/` 离线自检
+- **修掉三个既有隐患**：① 产物校验只看开头像素 → 宽图顶部白底被误判「空白」并中断推送；
+  ② 光栅化硬依赖系统 poppler → 改为 PyMuPDF 优先（纯 pip，换机器不再卡住）；
+  ③ 破折号兜底在**长字体列表**下静默失效（实测 14 个家族会让逐字回退整体退化）
+
+```bash
+pip install -r requirements.txt
+python setup_verify.py --selftest      # 体检 + 渲染自检
+python render.py --list                # 看「卡片类型 → 引擎」映射
+```
 
 ## 🎯 核心价值：任务提示词与数据分离，自由变体
 
@@ -31,7 +71,7 @@ book-to-learn 最关键的设计是**拆书数据与推送提示词彻底分离*
 - **多格式输入**：PDF、DOCX、HTML、EPUB、TXT、RTF，自动选择提取器并带回退链
 - **中英文自适应**：英文书联网核对术语 + 实时翻译；中文书跳过翻译
 - **两阶段架构**：拆书（一次性生成知识点数据）+ 推送（每次调用复用）
-- **两种推送方案**：IMA 知识库 PDF（默认）/ 飞书卡片消息（备选）
+- **跨平台为底**：默认产物落本地目录，IMA / 飞书为可选推送渠道
 - **提示词可变体**：同一数据，换提示词即可变成单词学习、诗词海报、新闻讲解等不同任务
 - **卡片式设计**：大字号、中英对照、术语表、配图内嵌、文件名带中文名
 - **进度自维护**：推送成功才记录进度，失败自动重推同一张
@@ -60,7 +100,7 @@ git clone https://github.com/sedey999/book-to-learn.git
 cd book-to-learn
 
 # 安装 Python 依赖
-sudo pip3 install weasyprint python-docx beautifulsoup4 ebooklib pypdf pdfminer.six
+pip3 install -r requirements.txt
 ```
 
 ### 中文字体（PDF 生成所需）
@@ -120,7 +160,7 @@ python3 $SKILL_DIR/book_setup.py prompt <book-slug>
 
 ## 📚 示例案例：Open Music Theory
 
-`examples/open-music-theory/` 目录包含一个完整的拆书案例，基于开放乐理教材，目前正在 IMA 知识库「【权威】音乐理论与AI创作」->「每日一个知识点」文件夹中每日更新。
+完整拆书案例（Open Music Theory，118 张卡片、272 张内嵌配图）正在 IMA 知识库「【权威】音乐理论与AI创作」->「每日一个知识点」文件夹中每日更新；案例完整文件见 GitHub 仓库 `examples/open-music-theory/`（本 ClawHub 包不含示例文件）。
 
 ### 案例信息
 
@@ -174,37 +214,50 @@ cd /home/admin/.openclaw/skills/omt-daily-push && python3 push_card.py mark <nex
 
 > 💡 **变体提示**：以上是"英文书 → 中英对照卡片"的标准流程。如果想变体，只需改这段提示词。比如：把步骤 2-4 换成"取知识点中的英文术语，联网搜索今天最新的相关英语新闻，用该术语讲解新闻"；或者把步骤 5 换成"生成一张精美诗词海报图片"。数据不变，任务随你变。
 
-案例完整文件详见 `examples/open-music-theory/`。
+案例完整文件详见 GitHub 仓库：https://github.com/sedey999/book-to-learn/tree/main/examples/open-music-theory
 
 ## 🔧 推送方案
 
 | 方案 | 优势 | 适用场景 |
 |------|------|----------|
-| **IMA PDF（默认）** | 知识库可检索、PDF 卡片式美观、配图内嵌离线可读 | 知识库积累、长期学习 |
-| **飞书卡片（备选）** | 即时通知、交互式卡片、主动触达 | 即时学习提醒、团队共学 |
+| **本地目录（默认）** | 零依赖零凭据，产物直接落工作目录 | 本地学习、自建归档 |
+| **IMA PDF（可选）** | 知识库可检索、PDF 卡片式美观、配图内嵌离线可读 | 知识库积累、长期学习 |
+| **飞书卡片（可选）** | 即时通知、交互式卡片、主动触达（webhook / Open API 两种方式） | 即时学习提醒、团队共学 |
 
-首次配置时选择推送方案。飞书卡片方案的图片通过免费图床（catbox.moe）上传获取 URL 后嵌入。
+默认 `pushMethod: local`（只落本地）；如需 IMA / 飞书，首次配置时选择并填写对应渠道。飞书 webhook 方案的图片通过免费图床（catbox.moe）上传获取 URL 后嵌入；飞书 Open API 方案原生直发图片/文件，无需图床。
 
 ## 📁 项目结构
 
 ```
 book-to-learn/
-├── SKILL.md                # 主指令（拆书+推送两阶段、首次配置流程）
+├── SKILL.md                # 主指令（三种来源模式、配置确认门禁、拆书+推送流程）
 ├── extract_text.py         # 多格式文本提取（PDF/DOCX/HTML/EPUB/TXT/RTF）
-├── book_setup.py           # 拆书编排
-├── push_card.py            # 推送进度管理（--book 参数化，支持多本书）
-├── gen_card_pdf.py         # 卡片式 PDF 生成（中英文自适应）
+├── fetch_site.py           # 网站模式：sitemap + 首页导航双通道抓取
+├── book_setup.py           # 拆书编排（配置/大纲/卡片/定时提示词）
+├── items_io.py             # 内容源读写（单文件 / 分章节两种布局）
+├── render.py               # 卡片渲染调度（类型 → 引擎映射，config 可覆盖）
+├── render_common.py        # 渲染公共工具库（字体/光栅化/校验）
+├── gen_card_pdf.py         # A4 标准卡片 PDF（中英文自适应）
+├── gen_card_pdf_large.py   # 大字闪卡 PDF
+├── gen_card_long.py        # 移动端学习长图
+├── gen_card_bilingual.py   # 中英对照文档
+├── gen_card_tile.py        # 竖版知识卡片长图（3:4/9:16 等，自适应防裁切+像素校验）
+├── tile_setup.py           # 资料拆卡任务初始化（GUIDE/PROGRESS/cards.json）
+├── push_card.py            # 推送进度管理（多本书、批量取卡）
+├── validate.py             # 推送前校验（内容源一致性 + 中英逐块对齐）
+├── setup_verify.py         # 开箱自检（依赖/字体/渲染通道）
+├── docs_layer.py           # 操作指南 + 进度笔记（本地为底，可选镜像知识库）
 ├── upload_ima.py           # IMA 知识库上传（密钥失效检测）
-├── send_feishu.py          # 飞书卡片推送（图床上传）
+├── send_feishu.py          # 飞书 webhook 卡片推送（图床上传）
 ├── send_feishu_api.py      # 飞书 Open API 推送（原生图片/文件直发）
 ├── process_attachments.py  # 相关链接附件下载/转换/重命名
+├── gen_image.py            # 闪卡式配图生成（变体场景）
+├── normalize_quotes.py     # 中文弯引号规范化
 ├── notify_failure.py       # 通用失败通知
-└── examples/
-    └── open-music-theory/  # 示例案例（正在 IMA 知识库更新中）
-        ├── SKILL.md
-        ├── items.json      # 118 个知识点
-        ├── cards/          # 118 张 HTML 卡片
-        └── ...
+├── references/             # 设计规格/配置 schema/平台笔记/踩坑笔记
+├── tests/                  # 离线自检测试
+├── samples/                # 载荷示例
+└── (完整示例案例见 GitHub 仓库 examples/ 目录)
 ```
 
 ## 🔒 安全
