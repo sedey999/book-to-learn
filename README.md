@@ -8,44 +8,6 @@
 
 **跨平台为底**：默认产物落本地目录，IMA / 飞书只是可选渠道；操作手册与进度一律写在工作目录，不依赖任何平台。
 
-## 🆕 v1.6 新增
-
-- **模式 C「资料拆卡」**：一份资料 → 一整套「一图一知识点」竖版卡片长图
-  - `gen_card_tile.py`：**3:4（默认）/ 9:16 / 1:1 / 4:3 / 16:9** 五种画布；
-    「先测量内容高度 → 溢出则整体缩字号（k）」的**自适应防裁切**；内置**像素级校验**
-    （尺寸 / 页数 / 空白 / 页脚），失败非 0 退出
-  - `tile_setup.py`：在工作目录建**任务文件夹**（如 `标点符号规范/`），内含
-    `GUIDE.md`（操作手册，内嵌全部规则与踩坑）+ `PROGRESS.md`（进度）+ `cards.json` + `src/` + `out/`
-  - 强制三道门禁：**先示例卡确认样式 → 全量文本稿确认 → 才批量出图**
-- **跨平台改造**：`pushMethod` 默认 `local`（零依赖）；IMA / 飞书降为可选渠道；
-  文档一律落工作目录（不落 skill）；新增 `references/platform-notes.md`（含 IMA 环境适配、
-  无删除接口的改名策略、长文本 WAF 绕行等）
-- **踩坑内嵌**：拆卡实战经验（测量阈值须含页脚、`flex: 0 0 auto`、weasyprint 下 `min-width:0` 无效、
-  视觉模型误判一律以像素为准、字体家族 ≤4、着重号圆点防拉伸…）已写进 `SKILL.md` 与生成的 `GUIDE.md`
-
-## 🆕 v1.5 新增
-
-- **两种来源**：书籍（原有）+ **网站**（`sitemap` + 首页导航双通道抓取，正文优先抓 `.md` 源）
-- **五种卡片类型**：A4 标准卡片 / 大字闪卡 / 闪卡配图 / **移动端学习长图** / **中英对照文档**
-  （`render.py` 按「类型 → 引擎」调度，映射可在 config 里覆盖）
-- **批量推送**：`push_card.py next --book X --n 5` 一次取 5 张；`mark --ids a,b,c success` 一次性回写
-  （`--n 1` 仍是原来的「每日一张 + 当日锁」语义）
-- **分章节内容源**：内容多时可拆成 `items/index.json` + `items/ch01.json`…，`items_io.py` 两种布局通吃
-- **首次启动确认门禁**：配置未与用户逐项确认前，`next` 直接拒绝发载荷（防「没确认就开跑」）
-- **文档层**：操作指南 + 进度笔记落在本地持久化目录（可选镜像到知识库笔记），
-  会话记忆被压缩或换人接手后读它们即可恢复
-- **推送前校验**：`validate.py` 检查内容源一致性 + **中英逐块对齐**（块数不一致会错位）
-- **开箱自检**：`setup_verify.py`（依赖 / 光栅化通道 / 中文字体 / 破折号字体）+ `tests/` 离线自检
-- **修掉三个既有隐患**：① 产物校验只看开头像素 → 宽图顶部白底被误判「空白」并中断推送；
-  ② 光栅化硬依赖系统 poppler → 改为 PyMuPDF 优先（纯 pip，换机器不再卡住）；
-  ③ 破折号兜底在**长字体列表**下静默失效（实测 14 个家族会让逐字回退整体退化）
-
-```bash
-pip install -r requirements.txt
-python setup_verify.py --selftest      # 体检 + 渲染自检
-python render.py --list                # 看「卡片类型 → 引擎」映射
-```
-
 ## 🎯 核心价值：任务提示词与数据分离，自由变体
 
 book-to-learn 最关键的设计是**拆书数据与推送提示词彻底分离**。拆书阶段生成的 `items.json` 是静态知识点库；每日推送时，定时任务执行的是一段**你可以随时修改的提示词**。
@@ -68,12 +30,18 @@ book-to-learn 最关键的设计是**拆书数据与推送提示词彻底分离*
 
 ## ✨ 特性
 
+- **三种来源模式**：书籍 / 网站（sitemap + 首页导航双通道，正文优先抓 .md 源）/ 资料拆卡
+- **五种卡片类型**：A4 标准卡片、大字闪卡、移动端学习长图、中英对照文档、竖版知识卡片长图（3:4 / 9:16 / 1:1 / 4:3 / 16:9 五种画布）
 - **多格式输入**：PDF、DOCX、HTML、EPUB、TXT、RTF，自动选择提取器并带回退链
-- **中英文自适应**：英文书联网核对术语 + 实时翻译；中文书跳过翻译
+- **中英文自适应**：英文内容联网核对术语 + 实时翻译；中文跳过翻译
 - **两阶段架构**：拆书（一次性生成知识点数据）+ 推送（每次调用复用）
-- **跨平台为底**：默认产物落本地目录，IMA / 飞书为可选推送渠道
+- **批量取卡**：`push_card.py next --book X --n 5` 一次取 N 张，`mark --ids a,b,c success` 一次性回写（`--n 1` 为每日一张 + 当日锁）
+- **自适应防裁切**：拆卡引擎先测量内容高度，溢出则整体缩字号；内置像素级校验（尺寸 / 页数 / 空白 / 页脚），失败非 0 退出
+- **推送前校验**：`validate.py` 检查内容源一致性 + 中英逐块对齐，块数不一致即中止
+- **配置确认门禁**：配置未与用户逐项确认前，`next` 拒绝发载荷，防止未确认就开跑
 - **提示词可变体**：同一数据，换提示词即可变成单词学习、诗词海报、新闻讲解等不同任务
-- **卡片式设计**：大字号、中英对照、术语表、配图内嵌、文件名带中文名
+- **文档层**：操作指南 + 进度笔记落本地持久化目录，会话记忆被压缩或换人接手后读文件即可恢复
+- **开箱自检**：`setup_verify.py` 体检（依赖 / 光栅化通道 / 中文字体 / 破折号字体）+ `tests/` 离线自检
 - **进度自维护**：推送成功才记录进度，失败自动重推同一张
 - **失败通知**：任何环节失败通过 webhook 通知，且不计进度
 - **通用化**：参数化配置，支持多本书，首次使用引导配置
@@ -120,7 +88,7 @@ PDF 卡片由 weasyprint 生成，依赖系统安装的中文字体。脚本已�
 ```bash
 cd /tmp && curl -sL -o ima-skills.zip "https://app-dl.ima.qq.com/skills/ima-skills-1.1.7.zip"
 mkdir -p ima-skills-extracted && unzip -o ima-skills.zip -d ima-skills-extracted >/dev/null 2>&1
-cp -r ima-skills-extracted/ima-skill ~/.codebuddy/skills/ima-skill
+cp -r ima-skills-extracted/ima-skill <你的 skills 目录>/ima-skill   # 如 ~/.openclaw/skills/ima-skill
 
 # 配置 IMA 凭证
 mkdir -p ~/.config/ima
@@ -128,17 +96,32 @@ echo "<your_client_id>" > ~/.config/ima/client_id
 printf '%s' "<your_api_key>" > ~/.config/ima/api_key
 ```
 
+安装完成后，在仓库目录跑一次自检：
+
+```bash
+python3 setup_verify.py --selftest   # 体检 + 渲染自检
+python3 render.py --list             # 看「卡片类型 → 引擎」映射
+```
+
 ## 🚀 使用
+
+### 三种模式入口
+
+| 模式 | 入口 | 说明 |
+|------|------|------|
+| **A 书籍** | `book_setup.py` | 拆书 → 每日推送，完整流程见下方两阶段 |
+| **B 网站** | `fetch_site.py` | 抓取在线文档站（sitemap + 首页导航双通道）→ catalog.json + raw/ |
+| **C 资料拆卡** | `tile_setup.py` | 工作目录建任务文件夹（GUIDE.md / PROGRESS.md / cards.json / src/ / out/），强制「示例卡确认样式 → 全量文本稿确认 → 批量出图」三道门禁 |
 
 ### 阶段一：拆书（每本书执行一次）
 
 ```bash
-SKILL_DIR=~/.codebuddy/skills/book-to-learn
+SKILL_DIR=<skill 安装目录>   # 如 ~/.openclaw/skills/book-to-learn
 
 # 1. 提取文本
 python3 $SKILL_DIR/extract_text.py your-book.pdf --out full_text.txt
 
-# 2. 初始化配置（AI 引导填写 IMA 目标 / 通知 webhook / 语言等）
+# 2. 初始化配置（AI 引导填写推送渠道 / 语言 / 通知 webhook 等）
 python3 $SKILL_DIR/book_setup.py init <book-slug> --title "书名" --lang en
 
 # 3. AI 分析结构，生成知识点大纲（需确认）
@@ -156,7 +139,7 @@ python3 $SKILL_DIR/book_setup.py prompt <book-slug>
 
 ### 阶段二：每日推送（定时任务调用）
 
-将 Step 7 输出的提示词配置到定时任务软件，设定触发时间即可。提示词可自由修改——这就是"变体"的入口：改提示词，不改数据，学习任务就变了。
+将 Step 7 输出的提示词配置到定时任务软件，设定触发时间即可。提示词可自由修改——这就是“变体”的入口：改提示词，不改数据，学习任务就变了。
 
 ## 📚 示例案例：Open Music Theory
 
@@ -212,7 +195,7 @@ cd /home/admin/.openclaw/skills/omt-daily-push && python3 push_card.py mark <nex
 9. 汇报：今日推送第 X/118 张、主题、术语核对要点、PDF 及附属文件上传情况、所有文件已上传至 IMA 知识库「每日一个知识点」文件夹。
 ```
 
-> 💡 **变体提示**：以上是"英文书 → 中英对照卡片"的标准流程。如果想变体，只需改这段提示词。比如：把步骤 2-4 换成"取知识点中的英文术语，联网搜索今天最新的相关英语新闻，用该术语讲解新闻"；或者把步骤 5 换成"生成一张精美诗词海报图片"。数据不变，任务随你变。
+> 💡 **变体提示**：以上是“英文书 → 中英对照卡片”的标准流程。如果想变体，只需改这段提示词。比如：把步骤 2-4 换成“取知识点中的英文术语，联网搜索今天最新的相关英语新闻，用该术语讲解新闻”；或者把步骤 5 换成“生成一张精美诗词海报图片”。数据不变，任务随你变。
 
 案例完整文件详见 GitHub 仓库：https://github.com/sedey999/book-to-learn/tree/main/examples/open-music-theory
 
@@ -267,5 +250,3 @@ book-to-learn/
 - 推送失败通知的 webhook 在首次配置时由用户填写
 
 ## 📄 License
-
-MIT
